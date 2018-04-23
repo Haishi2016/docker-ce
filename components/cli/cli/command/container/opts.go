@@ -42,6 +42,7 @@ type containerOptions struct {
 	deviceReadIOps     opts.ThrottledeviceOpt
 	deviceWriteIOps    opts.ThrottledeviceOpt
 	env                opts.ListOpts
+	patches		   opts.ListOpts
 	labels             opts.ListOpts
 	deviceCgroupRules  opts.ListOpts
 	devices            opts.ListOpts
@@ -141,6 +142,7 @@ func addFlags(flags *pflag.FlagSet) *containerOptions {
 		deviceWriteIOps:   opts.NewThrottledeviceOpt(opts.ValidateThrottleIOpsDevice),
 		devices:           opts.NewListOpts(validateDevice),
 		env:               opts.NewListOpts(opts.ValidateEnv),
+		patches:	   opts.NewListOpts(nil),
 		envFile:           opts.NewListOpts(nil),
 		expose:            opts.NewListOpts(nil),
 		extraHosts:        opts.NewListOpts(opts.ValidateExtraHost),
@@ -165,6 +167,7 @@ func addFlags(flags *pflag.FlagSet) *containerOptions {
 	flags.Var(&copts.deviceCgroupRules, "device-cgroup-rule", "Add a rule to the cgroup allowed devices list")
 	flags.Var(&copts.devices, "device", "Add a host device to the container")
 	flags.VarP(&copts.env, "env", "e", "Set environment variables")
+	flags.VarP(&copts.patches, "patch", "", "Set patches to be applied")
 	flags.Var(&copts.envFile, "env-file", "Read in a file of environment variables")
 	flags.StringVar(&copts.entrypoint, "entrypoint", "", "Overwrite the default ENTRYPOINT of the image")
 	flags.Var(&copts.groupAdd, "group-add", "Add additional groups to join")
