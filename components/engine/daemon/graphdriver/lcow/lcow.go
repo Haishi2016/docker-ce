@@ -640,7 +640,7 @@ func (d *Driver) Remove(id string) error {
 // For optimisation, we don't actually mount the filesystem (which in our
 // case means [hot-]adding it to a service VM. But we track that and defer
 // the actual adding to the point we need to access it.
-func (d *Driver) Get(id, mountLabel string) (containerfs.ContainerFS, error) {
+func (d *Driver) Get(id, mountLabel string, patchedLayers *map[string][]string) (containerfs.ContainerFS, error) {
 	title := fmt.Sprintf("lcowdriver: get: %s", id)
 	logrus.Debugf(title)
 

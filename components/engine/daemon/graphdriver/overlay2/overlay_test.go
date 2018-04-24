@@ -49,7 +49,7 @@ func skipIfNaive(t *testing.T) {
 // This avoids creating a new driver for each test if all tests are run
 // Make sure to put new tests between TestOverlaySetup and TestOverlayTeardown
 func TestOverlaySetup(t *testing.T) {
-	graphtest.GetDriver(t, driverName)
+	graphtest.GetDriver(t, driverName,nil)
 }
 
 func TestOverlayCreateEmpty(t *testing.T) {

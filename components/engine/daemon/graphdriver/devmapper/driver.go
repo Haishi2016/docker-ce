@@ -184,7 +184,7 @@ func (d *Driver) Remove(id string) error {
 }
 
 // Get mounts a device with given id into the root filesystem
-func (d *Driver) Get(id, mountLabel string) (containerfs.ContainerFS, error) {
+func (d *Driver) Get(id, mountLabel string, patchedLayers *map[string][]string) (containerfs.ContainerFS, error) {
 	d.locker.Lock(id)
 	defer d.locker.Unlock(id)
 	mp := path.Join(d.home, "mnt", id)

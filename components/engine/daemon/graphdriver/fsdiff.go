@@ -47,7 +47,7 @@ func (gdw *NaiveDiffDriver) Diff(id, parent string) (arch io.ReadCloser, err err
 	startTime := time.Now()
 	driver := gdw.ProtoDriver
 
-	layerRootFs, err := driver.Get(id, "")
+	layerRootFs, err := driver.Get(id, "",nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (gdw *NaiveDiffDriver) Diff(id, parent string) (arch io.ReadCloser, err err
 		}), nil
 	}
 
-	parentRootFs, err := driver.Get(parent, "")
+	parentRootFs, err := driver.Get(parent, "",nil)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (gdw *NaiveDiffDriver) Diff(id, parent string) (arch io.ReadCloser, err err
 func (gdw *NaiveDiffDriver) Changes(id, parent string) ([]archive.Change, error) {
 	driver := gdw.ProtoDriver
 
-	layerRootFs, err := driver.Get(id, "")
+	layerRootFs, err := driver.Get(id, "",nil)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (gdw *NaiveDiffDriver) Changes(id, parent string) ([]archive.Change, error)
 	parentFs := ""
 
 	if parent != "" {
-		parentRootFs, err := driver.Get(parent, "")
+		parentRootFs, err := driver.Get(parent, "",nil)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +135,7 @@ func (gdw *NaiveDiffDriver) ApplyDiff(id, parent string, diff io.Reader) (size i
 	driver := gdw.ProtoDriver
 
 	// Mount the root filesystem so we can apply the diff/layer.
-	layerRootFs, err := driver.Get(id, "")
+	layerRootFs, err := driver.Get(id, "",nil)
 	if err != nil {
 		return
 	}
@@ -165,7 +165,7 @@ func (gdw *NaiveDiffDriver) DiffSize(id, parent string) (size int64, err error) 
 		return
 	}
 
-	layerFs, err := driver.Get(id, "")
+	layerFs, err := driver.Get(id, "",nil)
 	if err != nil {
 		return
 	}

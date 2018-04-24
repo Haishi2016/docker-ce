@@ -170,11 +170,15 @@ type Metadata struct {
 // RWLayer.
 type MountInit func(root containerfs.ContainerFS) error
 
+// PatchOpts holds layers to be patched. The PatchedLayers map is keyed by
+// hash of the layer to be patched. The corresponding value is a list of 
+// layer hashes to be laied on top of the layer, in the specified order
 // CreateRWLayerOpts contains optional arguments to be passed to CreateRWLayer
 type CreateRWLayerOpts struct {
 	MountLabel string
 	InitFunc   MountInit
 	StorageOpt map[string]string
+ 	PatchedLayers map[string][]string	
 }
 
 // Store represents a backend for managing both

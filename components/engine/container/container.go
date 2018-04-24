@@ -68,6 +68,13 @@ type ExitStatus struct {
 	ExitedAt time.Time
 }
 
+//Container patches
+type PatchConfig struct {
+	Included	[]string
+	Excluded	[]string
+	All		bool
+}
+
 // Container holds the structure defining a container object.
 type Container struct {
 	StreamConfig *stream.Config
@@ -118,6 +125,9 @@ type Container struct {
 	// Fields here are specific to Windows
 	NetworkSharedContainerID string   `json:"-"`
 	SharedEndpointList       []string `json:"-"`
+
+	//Patches
+	Patches		*PatchConfig
 }
 
 // NewBaseContainer creates a new container with its

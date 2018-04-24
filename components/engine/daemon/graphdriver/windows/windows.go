@@ -341,7 +341,7 @@ func (d *Driver) Remove(id string) error {
 }
 
 // Get returns the rootfs path for the id. This will mount the dir at its given path.
-func (d *Driver) Get(id, mountLabel string) (containerfs.ContainerFS, error) {
+func (d *Driver) Get(id, mountLabel string, patchedLayers *map[string][]string) (containerfs.ContainerFS, error) {
 	logrus.Debugf("WindowsGraphDriver Get() id %s mountLabel %s", id, mountLabel)
 	var dir string
 
@@ -593,7 +593,7 @@ func (d *Driver) DiffSize(id, parent string) (size int64, err error) {
 		return
 	}
 
-	layerFs, err := d.Get(id, "")
+	layerFs, err := d.Get(id, "", nil)
 	if err != nil {
 		return
 	}

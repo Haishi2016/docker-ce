@@ -99,6 +99,11 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 		}
 		layerID = img.RootFS.ChainID()
 	}
+	
+	logrus.Debug("Container Patches-------------------------------------------")
+	logrus.Debugf("  Included: %v", container.Patches.Included)
+	logrus.Debugf("  Excluded: %v", container.Patches.Excluded)
+	logrus.Debugf("  All:      %v", container.Patches.All)
 
 	rwLayerOpts := &layer.CreateRWLayerOpts{
 		MountLabel: container.MountLabel,
