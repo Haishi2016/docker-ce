@@ -160,6 +160,8 @@ func (daemon *Daemon) newContainer(name string, operatingSystem string, config *
 	base.Name = name
 	base.Driver = daemon.imageService.GraphDriverForOS(operatingSystem)
 	base.OS = operatingSystem
+	base.Patches = config.Patches
+
 	return base, err
 }
 

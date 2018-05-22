@@ -293,6 +293,7 @@ type containerConfig struct {
 	Config           *container.Config
 	HostConfig       *container.HostConfig
 	NetworkingConfig *networktypes.NetworkingConfig
+	Patches		[]string
 }
 
 // parse parses the args for the specified command and generates a Config,
@@ -345,6 +346,12 @@ func parse(flags *pflag.FlagSet, copts *containerOptions) (*containerConfig, err
 			// there are duplicates entries.
 			delete(volumes, bind)
 		}
+	}
+
+        var patches []string
+
+	for patch := range copts.patches.GetMap() {
+		patches = append(patches, patch)
 	}
 
 	// Can't evaluate options passed into --tmpfs until we actually mount
@@ -656,11 +663,12 @@ func parse(flags *pflag.FlagSet, copts *containerOptions) (*containerConfig, err
 		copy(epConfig.Aliases, copts.aliases.GetAll())
 		networkingConfig.EndpointsConfig[string(hostConfig.NetworkMode)] = epConfig
 	}
-
+	
 	return &containerConfig{
 		Config:           config,
 		HostConfig:       hostConfig,
 		NetworkingConfig: networkingConfig,
+		Patches:	  patches,
 	}, nil
 }
 

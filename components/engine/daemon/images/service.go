@@ -93,6 +93,7 @@ func (i *ImageService) Children(id image.ID) []image.ID {
 func (i *ImageService) CreateLayer(container *container.Container, initFunc layer.MountInit) (layer.RWLayer, error) {
 	var layerID layer.ChainID
 	if container.ImageID != "" {
+		logrus.Debugf("Check Container ID =======================> %s", container.ImageID)
 		img, err := i.imageStore.Get(container.ImageID)
 		if err != nil {
 			return nil, err
@@ -101,14 +102,25 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 	}
 	
 	logrus.Debug("Container Patches-------------------------------------------")
-	logrus.Debugf("  Included: %v", container.Patches.Included)
-	logrus.Debugf("  Excluded: %v", container.Patches.Excluded)
-	logrus.Debugf("  All:      %v", container.Patches.All)
+	logrus.Debugf("  LIST: %v", container.Patches)
 
+	patchMap := make(map[string][]string)
+	
+	if container.Patches!= nil && len(container.Patches) > 0 {
+		for _, p := range container.Patches{
+			pImg, err := i.GetImage(p)
+			if err != nil {
+				return nil, err
+			}
+			
+			patchMap[pImg.RootFS.ChainID().String()] = []string{"abcdefg"}
+		}
+	}
 	rwLayerOpts := &layer.CreateRWLayerOpts{
 		MountLabel: container.MountLabel,
 		InitFunc:   initFunc,
 		StorageOpt: container.HostConfig.StorageOpt,
+		PatchedLayers: patchMap,
 	}
 
 	// Indexing by OS is safe here as validation of OS has already been performed in create() (the only

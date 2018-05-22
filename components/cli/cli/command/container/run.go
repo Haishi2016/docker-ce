@@ -120,6 +120,7 @@ func runRun(dockerCli command.Cli, flags *pflag.FlagSet, ropts *runOptions, copt
 // nolint: gocyclo
 func runContainer(dockerCli command.Cli, opts *runOptions, copts *containerOptions, containerConfig *containerConfig) error {
 	config := containerConfig.Config
+
 	hostConfig := containerConfig.HostConfig
 	stdout, stderr := dockerCli.Out(), dockerCli.Err()
 	client := dockerCli.Client()

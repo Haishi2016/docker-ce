@@ -11,6 +11,7 @@ type ContainerConfigWrapper struct {
 	*container.Config
 	HostConfig       *container.HostConfig          `json:"HostConfig,omitempty"`
 	NetworkingConfig *networktypes.NetworkingConfig `json:"NetworkingConfig,omitempty"`
+	Patches		[]string
 }
 
 // getHostConfig gets the HostConfig of the Config.

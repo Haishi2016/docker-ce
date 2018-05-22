@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"syscall"
+	"strings"
 
 	"github.com/docker/docker/api/server/httputils"
 	"github.com/docker/docker/api/types"
@@ -453,10 +454,18 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 
 	name := r.Form.Get("name")
 
+	logrus.Debugf("HERE IS THE NAME: %v", name)
+
+	decodedName := name[strings.LastIndex(name, "]")+1:]
+
+
 	config, hostConfig, networkingConfig, err := s.decoder.DecodeConfig(r.Body)
 	if err != nil {
 		return err
 	}
+
+	config.Patches = strings.Split(name[1:strings.LastIndex(name,"]")], ",")
+
 	version := httputils.VersionFromContext(ctx)
 	adjustCPUShares := versions.LessThan(version, "1.19")
 
@@ -465,8 +474,10 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 		hostConfig.AutoRemove = false
 	}
 
+        logrus.Debugf("HEY, HERE IS YOUR CONFIG: %v", config.Patches)	
+	
 	ccr, err := s.backend.ContainerCreate(types.ContainerCreateConfig{
-		Name:             name,
+		Name:             decodedName,
 		Config:           config,
 		HostConfig:       hostConfig,
 		NetworkingConfig: networkingConfig,

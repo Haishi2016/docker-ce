@@ -46,6 +46,9 @@ func decodeContainerConfig(src io.Reader) (*container.Config, *container.HostCon
 		}
 	}
 
+	w.Config.Patches = make([]string, len(w.Patches))
+	copy(w.Config.Patches, w.Patches)
+
 	// Certain parameters need daemon-side validation that cannot be done
 	// on the client, as only the daemon knows what is valid for the platform.
 	if err := validateNetMode(w.Config, hc); err != nil {

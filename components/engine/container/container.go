@@ -68,12 +68,6 @@ type ExitStatus struct {
 	ExitedAt time.Time
 }
 
-//Container patches
-type PatchConfig struct {
-	Included	[]string
-	Excluded	[]string
-	All		bool
-}
 
 // Container holds the structure defining a container object.
 type Container struct {
@@ -127,7 +121,7 @@ type Container struct {
 	SharedEndpointList       []string `json:"-"`
 
 	//Patches
-	Patches		*PatchConfig
+	Patches		[]string
 }
 
 // NewBaseContainer creates a new container with its

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
@@ -161,7 +162,9 @@ func newCIDFile(path string) (*cidFile, error) {
 
 func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig *containerConfig, opts *createOptions) (*container.ContainerCreateCreatedBody, error) {
 	config := containerConfig.Config
+
 	hostConfig := containerConfig.HostConfig
+
 	networkingConfig := containerConfig.NetworkingConfig
 	stderr := dockerCli.Err()
 
@@ -193,8 +196,10 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 		}
 	}
 
+	nameHack := "[" + strings.Join(containerConfig.Patches,",") + "]" + opts.name
+
 	//create the container
-	response, err := dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, opts.name)
+	response, err := dockerCli.Client().ContainerCreate(ctx, config, hostConfig, networkingConfig, nameHack)
 
 	//if image not found try to pull it
 	if err != nil {

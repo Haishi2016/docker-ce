@@ -88,6 +88,7 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 		imgID     image.ID
 		err       error
 	)
+	logrus.Debug("HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
 
 	os := runtime.GOOS
 	if params.Config.Image != "" {
@@ -117,7 +118,7 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 	if err := daemon.mergeAndVerifyConfig(params.Config, img); err != nil {
 		return nil, errdefs.InvalidParameter(err)
 	}
-
+	
 	if err := daemon.mergeAndVerifyLogConfig(&params.HostConfig.LogConfig); err != nil {
 		return nil, errdefs.InvalidParameter(err)
 	}
@@ -155,6 +156,9 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 			}
 		}
 	}
+	logrus.Debugf("Params-=-=-=-=-=-=-=-=-=-=-> %v", params)
+
+	logrus.Debugf("Patches-------------------> %v", container.Patches)
 
 	// Set RWLayer for container after mount labels have been set
 	rwLayer, err := daemon.imageService.CreateLayer(container, setupInitLayer(daemon.idMappings))

@@ -15,6 +15,7 @@ type ContainerConfigWrapper struct {
 	Cpuset                string                         `json:",omitempty"` // Deprecated. Exported for backwards compatibility.
 	NetworkingConfig      *networktypes.NetworkingConfig `json:"NetworkingConfig,omitempty"`
 	*container.HostConfig                                // Deprecated. Exported to read attributes from json that are not in the inner host config structure.
+	Patches		    []string
 }
 
 // getHostConfig gets the HostConfig of the Config.
