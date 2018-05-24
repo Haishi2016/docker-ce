@@ -454,17 +454,24 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 
 	name := r.Form.Get("name")
 
-	logrus.Debugf("HERE IS THE NAME: %v", name)
+	logrus.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NAME: %v", name)
 
-	decodedName := name[strings.LastIndex(name, "]")+1:]
+   	decodedName := name
 
+	if strings.LastIndex(name,"]") > 0 {	
+		decodedName = name[strings.LastIndex(name, "]")+1:]
+	} 
 
 	config, hostConfig, networkingConfig, err := s.decoder.DecodeConfig(r.Body)
 	if err != nil {
 		return err
 	}
 
-	config.Patches = strings.Split(name[1:strings.LastIndex(name,"]")], ",")
+	if strings.LastIndex(name,"]")>0 {
+		config.Patches = strings.Split(name[1:strings.LastIndex(name,"]")], ",")
+	}
+
+	logrus.Debugf(">>>>>>>>>>>>>>>>>>>>>>>config.Patches %v", config.Patches)
 
 	version := httputils.VersionFromContext(ctx)
 	adjustCPUShares := versions.LessThan(version, "1.19")
@@ -474,8 +481,8 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 		hostConfig.AutoRemove = false
 	}
 
-        logrus.Debugf("HEY, HERE IS YOUR CONFIG: %v", config.Patches)	
-	
+	logrus.Debugf(">>>>>>>>>>>>>>>>>>>Container Name: %v", decodedName)
+
 	ccr, err := s.backend.ContainerCreate(types.ContainerCreateConfig{
 		Name:             decodedName,
 		Config:           config,

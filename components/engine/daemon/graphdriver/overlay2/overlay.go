@@ -528,13 +528,16 @@ func (d *Driver) Remove(id string) error {
 }
 
 // Get creates and mounts the required file system for the given id and returns the mount path.
-func (d *Driver) Get(id, mountLabel string, patchedLayers *map[string][]string) (_ containerfs.ContainerFS, retErr error) {
+func (d *Driver) Get(id, mountLabel string) (_ containerfs.ContainerFS, retErr error) {
 	d.locker.Lock(id)
 	defer d.locker.Unlock(id)
 	dir := d.dir(id)
 	if _, err := os.Stat(dir); err != nil {
 		return nil, err
 	}
+
+	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$$$$$ requested id: %v", id)
+	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$$$$$ resolved dir: %v", dir)
 
 	diffDir := path.Join(dir, "diff")
 	lowers, err := ioutil.ReadFile(path.Join(dir, lowerFile))
@@ -570,6 +573,9 @@ func (d *Driver) Get(id, mountLabel string, patchedLayers *map[string][]string) 
 	for i, s := range splitLowers {
 		absLowers[i] = path.Join(d.home, s)
 	}
+
+	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$ lowers: %v", lowers)
+
 	opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", strings.Join(absLowers, ":"), path.Join(dir, "diff"), path.Join(dir, "work"))
 	mountData := label.FormatMountLabel(opts, mountLabel)
 	mount := unix.Mount

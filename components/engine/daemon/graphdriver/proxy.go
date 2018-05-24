@@ -129,7 +129,7 @@ func (d *graphDriverProxy) Remove(id string) error {
 	return nil
 }
 
-func (d *graphDriverProxy) Get(id, mountLabel string, patchedLayers *map[string][]string) (containerfs.ContainerFS, error) {
+func (d *graphDriverProxy) Get(id, mountLabel string) (containerfs.ContainerFS, error) {
 	args := &graphDriverRequest{
 		ID:         id,
 		MountLabel: mountLabel,

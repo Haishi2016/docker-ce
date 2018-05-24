@@ -34,7 +34,6 @@ var (
 type CreateOpts struct {
 	MountLabel string
 	StorageOpt map[string]string
-	PatchedLayers map[string][]string
 }
 
 // InitFunc initializes the storage driver.
@@ -62,7 +61,7 @@ type ProtoDriver interface {
 	// Get returns the mountpoint for the layered filesystem referred
 	// to by this id. You can optionally specify a mountLabel or "".
 	// Returns the absolute path to the mounted layered filesystem.
-	Get(id, mountLabel string, patchedLayers *map[string][]string) (fs containerfs.ContainerFS, err error)
+	Get(id, mountLabel string) (fs containerfs.ContainerFS, err error)
 	// Put releases the system resources for the specified id,
 	// e.g, unmounting layered filesystem.
 	Put(id string) error

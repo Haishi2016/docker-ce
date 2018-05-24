@@ -178,7 +178,6 @@ type CreateRWLayerOpts struct {
 	MountLabel string
 	InitFunc   MountInit
 	StorageOpt map[string]string
- 	PatchedLayers map[string][]string	
 }
 
 // Store represents a backend for managing both

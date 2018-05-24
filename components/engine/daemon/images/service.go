@@ -92,6 +92,8 @@ func (i *ImageService) Children(id image.ID) []image.ID {
 // TODO: accept an opt struct instead of container?
 func (i *ImageService) CreateLayer(container *container.Container, initFunc layer.MountInit) (layer.RWLayer, error) {
 	var layerID layer.ChainID
+	patchMap := make(map[string][]layer.DiffID)
+
 	if container.ImageID != "" {
 		logrus.Debugf("Check Container ID =======================> %s", container.ImageID)
 		img, err := i.imageStore.Get(container.ImageID)
@@ -99,28 +101,42 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 			return nil, err
 		}
 		layerID = img.RootFS.ChainID()
-	}
-	
-	logrus.Debug("Container Patches-------------------------------------------")
-	logrus.Debugf("  LIST: %v", container.Patches)
 
-	patchMap := make(map[string][]string)
-	
-	if container.Patches!= nil && len(container.Patches) > 0 {
-		for _, p := range container.Patches{
-			pImg, err := i.GetImage(p)
-			if err != nil {
-				return nil, err
+		if container.Patches != nil && len(container.Patches) > 0 {
+			for _, p := range container.Patches {
+				pImg, err := i.GetImage(p)
+				if err != nil {
+					return nil, err
+				}
+				//set the patch map key to the second last DiffID in the image
+				//the value is the list of layers on top of that
+				lastMissmatch := 0
+				for i, _ := range img.RootFS.DiffIDs {
+					lastMissmatch = i
+					if string(img.RootFS.DiffIDs[i]) != string(pImg.RootFS.DiffIDs[i]) {
+						break
+					} 
+				}
+				if lastMissmatch > 0 {
+					_, ok := patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])]
+					if ok {
+						if len(patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])]) < len(pImg.RootFS.DiffIDs[lastMissmatch+1:]) {
+							patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch+1:]
+						}
+					} else {
+						patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch+1:]
+					}
+				}
 			}
-			
-			patchMap[pImg.RootFS.ChainID().String()] = []string{"abcdefg"}
 		}
 	}
+
+	logrus.Debugf("Patch map ======================= %v", patchMap)
+
 	rwLayerOpts := &layer.CreateRWLayerOpts{
 		MountLabel: container.MountLabel,
 		InitFunc:   initFunc,
 		StorageOpt: container.HostConfig.StorageOpt,
-		PatchedLayers: patchMap,
 	}
 
 	// Indexing by OS is safe here as validation of OS has already been performed in create() (the only

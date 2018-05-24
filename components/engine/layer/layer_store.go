@@ -477,14 +477,12 @@ func (ls *layerStore) CreateRWLayer(name string, parent ChainID, opts *CreateRWL
 		storageOpt map[string]string
 		initFunc   MountInit
 		mountLabel string
-		patchedLayers map[string][]string
 	)
 
 	if opts != nil {
 		mountLabel = opts.MountLabel
 		storageOpt = opts.StorageOpt
 		initFunc = opts.InitFunc
-		patchedLayers = opts.PatchedLayers
 	}
 
 	ls.mountL.Lock()
@@ -532,7 +530,7 @@ func (ls *layerStore) CreateRWLayer(name string, parent ChainID, opts *CreateRWL
 
 	createOpts := &graphdriver.CreateOpts{
 		StorageOpt: storageOpt,
-		PatchedLayers: patchedLayers}
+	}
 
 	if err = ls.driver.CreateReadWrite(m.mountID, pid, createOpts); err != nil {
 		return nil, err
@@ -646,12 +644,12 @@ func (ls *layerStore) initMount(graphID, parent, mountLabel string, initFunc Mou
 	createOpts := &graphdriver.CreateOpts{
 		MountLabel: mountLabel,
 		StorageOpt: createOpt.StorageOpt,
-		PatchedLayers: createOpt.PatchedLayers}
+	}
 
 	if err := ls.driver.CreateReadWrite(initID, parent, createOpts); err != nil {
 		return "", err
 	}
-	p, err := ls.driver.Get(initID, "", &createOpts.PatchedLayers)
+	p, err := ls.driver.Get(initID, "")
 	if err != nil {
 		return "", err
 	}
@@ -744,7 +742,7 @@ func (w *fileGetPutter) Close() error {
 }
 
 func (n *naiveDiffPathDriver) DiffGetter(id string) (graphdriver.FileGetCloser, error) {
-	p, err := n.Driver.Get(id, "", nil)
+	p, err := n.Driver.Get(id, "")
 	if err != nil {
 		return nil, err
 	}
