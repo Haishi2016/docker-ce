@@ -113,25 +113,94 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 				lastMissmatch := 0
 				for i, _ := range img.RootFS.DiffIDs {
 					lastMissmatch = i
+					if lastMissmatch >= len(pImg.RootFS.DiffIDs) {
+						break
+					}
 					if string(img.RootFS.DiffIDs[i]) != string(pImg.RootFS.DiffIDs[i]) {
 						break
 					} 
 				}
-				if lastMissmatch > 0 {
-					_, ok := patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])]
+				if lastMissmatch > 0 && lastMissmatch < len(pImg.RootFS.DiffIDs) {
+					_, ok := patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])]
 					if ok {
-						if len(patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])]) < len(pImg.RootFS.DiffIDs[lastMissmatch+1:]) {
-							patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch+1:]
+						if len(patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])]) < len(pImg.RootFS.DiffIDs[lastMissmatch:]) {
+							patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
+						} else {
+							patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
 						}
 					} else {
-						patchMap[string(pImg.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch+1:]
+						patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
 					}
 				}
 			}
+			index := 0
+			originalLayers := make([]layer.DiffID, len(img.RootFS.DiffIDs))
+			copy(originalLayers, img.RootFS.DiffIDs)
+			for index < len(img.RootFS.DiffIDs) {
+				mItem, ok := patchMap[string(img.RootFS.DiffIDs[index])]
+				if ok {
+					tmp := make([]layer.DiffID, index)
+					copy(tmp, img.RootFS.DiffIDs[:index])
+					tmp2 := make([]layer.DiffID, len(img.RootFS.DiffIDs)-index)
+					copy(tmp2, img.RootFS.DiffIDs[index:])
+					tmp = append(tmp, mItem...)
+					img.RootFS.DiffIDs = append(tmp, tmp2...)
+					index += len(mItem)+1
+				} else {
+					index++
+				}
+			}
+			index = 0
+			var newIds []layer.DiffID
+			for index < len(img.RootFS.DiffIDs) {
+				newIds = append(newIds, img.RootFS.DiffIDs[index])
+				updatedChainID := createChainID(newIds)
+				_, err := i.layerStores[container.OS].Get(updatedChainID)
+				if err != nil {
+					//start tracking back to a good layer
+					logrus.Debug("Start backtracking")
+					var originalDiffs []layer.DiffID
+					for j := 0; j < len(originalLayers); j++ {
+						if originalLayers[j] != img.RootFS.DiffIDs[index] {
+							originalDiffs = append(originalDiffs, originalLayers[j])
+						} else {
+							originalDiffs = append(originalDiffs, img.RootFS.DiffIDs[index])
+							break
+						}
+					}
+					goodChainID := createChainID(originalDiffs)
+					logrus.Debugf("Trying to get layer: %v", goodChainID)
+					tl, err := i.layerStores[container.OS].Get(goodChainID)
+					if err == nil {
+						logrus.Debug("Original layer found")
+						ts, err := tl.TarStream()
+						if err != nil {
+							return nil, err
+						}
+						defer ts.Close()
+						logrus.Debug("About to register new layer")
+						nl, err := i.layerStores[container.OS].Register(ts, createChainID(newIds[:len(newIds)-1]))
+						if err != nil {
+							return nil, err
+						} else {
+							logrus.Debug("New layer registered")
+							newIds = append(newIds[:len(newIds)-1], nl.DiffID()) 
+						}
+					} else {
+						logrus.Debug("LAYER TRACK BACK FAILED")
+						return nil, err
+					}
+				} else {
+					logrus.Debugf("LAYER CHECKED FINE FOR INDEX: %v", index)
+				}
+				index++
+			}
+			copy(img.RootFS.DiffIDs, newIds)
+			layerID = img.RootFS.ChainID()
+			jsonx, _ := img.MarshalJSON()
+			logrus.Debugf("UPDATED IMAGE: %v", string(jsonx))
 		}
 	}
-
-	logrus.Debugf("Patch map ======================= %v", patchMap)
 
 	rwLayerOpts := &layer.CreateRWLayerOpts{
 		MountLabel: container.MountLabel,
@@ -139,11 +208,26 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 		StorageOpt: container.HostConfig.StorageOpt,
 	}
 
+	logrus.Debugf("Container.ID: %v", container.ID)
+	logrus.Debugf("Layer ID: %v", layerID)
+
 	// Indexing by OS is safe here as validation of OS has already been performed in create() (the only
 	// caller), and guaranteed non-nil
 	return i.layerStores[container.OS].CreateRWLayer(container.ID, layerID, rwLayerOpts)
 }
-
+func createChainID(dgsts []layer.DiffID) layer.ChainID {
+	return createChainIDFromParent("", dgsts...)
+}
+func createChainIDFromParent(parent layer.ChainID, dgsts ...layer.DiffID) layer.ChainID {
+	if len(dgsts) == 0 {
+		return parent
+	}
+	if parent == "" {
+		return createChainIDFromParent(layer.ChainID(dgsts[0]),dgsts[1:]...)
+	}
+	dgst := digest.FromBytes([]byte(string(parent) + " " + string(dgsts[0])))
+	return createChainIDFromParent(layer.ChainID(dgst), dgsts[1:]...)
+}
 // GetLayerByID returns a layer by ID and operating system
 // called from daemon.go Daemon.restore(), and Daemon.containerExport()
 func (i *ImageService) GetLayerByID(cid string, os string) (layer.RWLayer, error) {
