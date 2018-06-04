@@ -21,6 +21,8 @@ import (
 	"github.com/docker/docker/runconfig"
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/sirupsen/logrus"
+	"github.com/docker/docker/layer"
+	"github.com/opencontainers/go-digest"
 )
 
 // CreateManagedContainer creates a container that is managed by a Service
@@ -107,6 +109,40 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 
 		if runtime.GOOS == "windows" && img.OS == "linux" && !system.LCOWSupported() {
 			return nil, errors.New("operating system on which parent image was created is not Windows")
+		}
+		if len(params.Config.Patches) > 0 {
+			allPatches := false
+			criticalPatches := false
+			for i := 0; i < len(params.Config.Patches); i++ {
+				if val := params.Config.Patches[i]; strings.EqualFold(val, "all") {
+					allPatches = true
+				}
+				if val := params.Config.Patches[i]; strings.EqualFold(val, "critical") {
+					criticalPatches = true
+				}
+			}
+			if allPatches || criticalPatches {
+				patches, err := daemon.imageService.GetPatches(img.ID())
+				if err != nil {
+					logrus.Debug("Failed to read patches")
+					return nil, err
+				}
+				logrus.Debugf("Retrieved Patch List: %v", patches)
+
+				for i := len(patches)-1; i >= 0; i-- {
+					if strings.HasPrefix(patches[i], "*") {
+						patches[i] = patches[i][1:]
+					} else {
+						if criticalPatches {
+							patches = append(patches[:i], patches[i+1:]...)
+						}
+					}
+				}
+				params.Config.Patches = make([]string, len(patches))
+				copy(params.Config.Patches, patches)
+				logrus.Debugf("Updated Patch List: %v", params.Config.Patches)
+			}
+
 		}
 	} else {
 		if runtime.GOOS == "windows" {
@@ -202,6 +238,19 @@ func toHostConfigSelinuxLabels(labels []string) []string {
 		labels[i] = "label=" + l
 	}
 	return labels
+}
+func createChainID(dgsts []layer.DiffID) layer.ChainID {
+	return createChainIDFromParent("", dgsts...)
+}
+func createChainIDFromParent(parent layer.ChainID, dgsts ...layer.DiffID) layer.ChainID {
+	if len(dgsts) == 0 {
+		return parent
+	}
+	if parent == "" {
+		return createChainIDFromParent(layer.ChainID(dgsts[0]), dgsts[1:]...)
+	}
+	dgst := digest.FromBytes([]byte(string(parent) + " " + string(dgsts[0])))
+	return createChainIDFromParent(layer.ChainID(dgst), dgsts[1:]...)
 }
 
 func (daemon *Daemon) generateSecurityOpt(hostConfig *containertypes.HostConfig) ([]string, error) {

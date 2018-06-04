@@ -454,10 +454,9 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 
 	name := r.Form.Get("name")
 
-	logrus.Debugf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NAME: %v", name)
-
    	decodedName := name
 
+	//This is a hack to pass patch list without modifying the API
 	if strings.LastIndex(name,"]") > 0 {	
 		decodedName = name[strings.LastIndex(name, "]")+1:]
 	} 
@@ -468,10 +467,9 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 	}
 
 	if strings.LastIndex(name,"]")>0 {
+		//comma-separated patch list is passed as part of the name parameter
 		config.Patches = strings.Split(name[1:strings.LastIndex(name,"]")], ",")
 	}
-
-	logrus.Debugf(">>>>>>>>>>>>>>>>>>>>>>>config.Patches %v", config.Patches)
 
 	version := httputils.VersionFromContext(ctx)
 	adjustCPUShares := versions.LessThan(version, "1.19")
@@ -480,8 +478,6 @@ func (s *containerRouter) postContainersCreate(ctx context.Context, w http.Respo
 	if hostConfig != nil && versions.LessThan(version, "1.25") {
 		hostConfig.AutoRemove = false
 	}
-
-	logrus.Debugf(">>>>>>>>>>>>>>>>>>>Container Name: %v", decodedName)
 
 	ccr, err := s.backend.ContainerCreate(types.ContainerCreateConfig{
 		Name:             decodedName,

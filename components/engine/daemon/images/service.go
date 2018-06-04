@@ -87,6 +87,10 @@ func (i *ImageService) Children(id image.ID) []image.ID {
 	return i.imageStore.Children(id)
 }
 
+func (i *ImageService) GetPatches(id image.ID) ([]string, error) {
+	return i.imageStore.GetPatches(id)
+}
+
 // CreateLayer creates a filesystem layer for a container.
 // called from create.go
 // TODO: accept an opt struct instead of container?
