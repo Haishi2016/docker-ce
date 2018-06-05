@@ -107,46 +107,51 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 		layerID = img.RootFS.ChainID()
 
 		if container.Patches != nil && len(container.Patches) > 0 {
+			chainLookUpMap :=make(map[string]layer.ChainID)
 			for _, p := range container.Patches {
-				pImg, err := i.GetImage(p)
-				if err != nil {
-					return nil, err
-				}
-				//set the patch map key to the second last DiffID in the image
-				//the value is the list of layers on top of that
-				lastMissmatch := 0
-				for i, _ := range img.RootFS.DiffIDs {
-					lastMissmatch = i
-					if lastMissmatch >= len(pImg.RootFS.DiffIDs) {
-						break
+				if p != "" {
+					pImg, err := i.GetImage(p)
+					if err != nil {
+						return nil, err
 					}
-					if string(img.RootFS.DiffIDs[i]) != string(pImg.RootFS.DiffIDs[i]) {
-						break
-					} 
-				}
-				if lastMissmatch > 0 && lastMissmatch < len(pImg.RootFS.DiffIDs) {
-					_, ok := patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])]
-					if ok {
-						if len(patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])]) < len(pImg.RootFS.DiffIDs[lastMissmatch:]) {
-							patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
-						} else {
-							patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
+					//set the patch map key to the second last DiffID in the image
+					//the value is the list of layers on top of that
+					lastMissmatch := 0
+					for i, _ := range img.RootFS.DiffIDs {
+						lastMissmatch = i
+						if lastMissmatch >= len(pImg.RootFS.DiffIDs) {
+							break
 						}
-					} else {
-						patchMap[string(img.RootFS.DiffIDs[lastMissmatch])] = pImg.RootFS.DiffIDs[lastMissmatch:]
+						if string(img.RootFS.DiffIDs[i]) != string(pImg.RootFS.DiffIDs[i]) {
+							break
+						}	 
+					}
+					if lastMissmatch > 0 && lastMissmatch < len(pImg.RootFS.DiffIDs) {
+						_, ok := patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])]
+						if ok {
+							patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])] = append(patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])], pImg.RootFS.DiffIDs[lastMissmatch:]...)
+						} else {
+							patchMap[string(img.RootFS.DiffIDs[lastMissmatch-1])] = pImg.RootFS.DiffIDs[lastMissmatch:]
+						}
+						for i, p := range pImg.RootFS.DiffIDs[lastMissmatch:] {
+							chainLookUpMap[string(p)]=createChainID(pImg.RootFS.DiffIDs[:lastMissmatch+i+1])	
+						}
 					}
 				}
 			}
 			index := 0
-			originalLayers := make([]layer.DiffID, len(img.RootFS.DiffIDs))
-			copy(originalLayers, img.RootFS.DiffIDs)
+			//originalLayers := make([]layer.DiffID, len(img.RootFS.DiffIDs))
+			//copy(originalLayers, img.RootFS.DiffIDs)
+			for i, l := range img.RootFS.DiffIDs {
+				chainLookUpMap[string(l)]=createChainID(img.RootFS.DiffIDs[:i+1])
+			}
 			for index < len(img.RootFS.DiffIDs) {
 				mItem, ok := patchMap[string(img.RootFS.DiffIDs[index])]
 				if ok {
-					tmp := make([]layer.DiffID, index)
-					copy(tmp, img.RootFS.DiffIDs[:index])
-					tmp2 := make([]layer.DiffID, len(img.RootFS.DiffIDs)-index)
-					copy(tmp2, img.RootFS.DiffIDs[index:])
+					tmp := make([]layer.DiffID, index+1)
+					copy(tmp, img.RootFS.DiffIDs[:index+1])
+					tmp2 := make([]layer.DiffID, len(img.RootFS.DiffIDs)-index-1)
+					copy(tmp2, img.RootFS.DiffIDs[index+1:])
 					tmp = append(tmp, mItem...)
 					img.RootFS.DiffIDs = append(tmp, tmp2...)
 					index += len(mItem)+1
@@ -163,16 +168,20 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 				if err != nil {
 					//start tracking back to a good layer
 					logrus.Debug("Start backtracking")
-					var originalDiffs []layer.DiffID
-					for j := 0; j < len(originalLayers); j++ {
-						if originalLayers[j] != img.RootFS.DiffIDs[index] {
-							originalDiffs = append(originalDiffs, originalLayers[j])
-						} else {
-							originalDiffs = append(originalDiffs, img.RootFS.DiffIDs[index])
-							break
-						}
+					//var originalDiffs []layer.DiffID
+					//for j := 0; j < len(originalLayers); j++ {
+					//	if originalLayers[j] != img.RootFS.DiffIDs[index] {
+					//		originalDiffs = append(originalDiffs, originalLayers[j])
+					//	} else {
+					//		originalDiffs = append(originalDiffs, img.RootFS.DiffIDs[index])
+					//		break
+					//	}
+					//}
+					goodChainID, ok := chainLookUpMap[string(img.RootFS.DiffIDs[index])]
+					if !ok {
+						logrus.Debugf("Failed to lookup chain ID for layer: %v", img.RootFS.DiffIDs[index])
+						return nil, err
 					}
-					goodChainID := createChainID(originalDiffs)
 					logrus.Debugf("Trying to get layer: %v", goodChainID)
 					tl, err := i.layerStores[container.OS].Get(goodChainID)
 					if err == nil {
