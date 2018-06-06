@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -11,7 +12,6 @@ import (
 	apiclient "github.com/docker/docker/client"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/context"
 )
 
 type inspectOptions struct {
@@ -170,10 +170,6 @@ func inspectAll(ctx context.Context, dockerCli *command.DockerCli, getSize bool,
 		return info.Swarm.ControlAvailable
 	}
 
-	isErrNotSupported := func(err error) bool {
-		return strings.Contains(err.Error(), "not supported")
-	}
-
 	return func(ref string) (interface{}, []byte, error) {
 		const (
 			swarmSupportUnknown = iota
@@ -201,7 +197,7 @@ func inspectAll(ctx context.Context, dockerCli *command.DockerCli, getSize bool,
 			}
 			v, raw, err := inspectData.objectInspector(ref)
 			if err != nil {
-				if typeConstraint == "" && (apiclient.IsErrNotFound(err) || isErrNotSupported(err)) {
+				if typeConstraint == "" && isErrSkippable(err) {
 					continue
 				}
 				return v, raw, err
@@ -213,4 +209,10 @@ func inspectAll(ctx context.Context, dockerCli *command.DockerCli, getSize bool,
 		}
 		return nil, nil, errors.Errorf("Error: No such object: %s", ref)
 	}
+}
+
+func isErrSkippable(err error) bool {
+	return apiclient.IsErrNotFound(err) ||
+		strings.Contains(err.Error(), "not supported") ||
+		strings.Contains(err.Error(), "invalid reference format")
 }

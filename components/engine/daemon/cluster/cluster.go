@@ -39,6 +39,7 @@ package cluster // import "github.com/docker/docker/daemon/cluster"
 //
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -56,7 +57,6 @@ import (
 	swarmnode "github.com/docker/swarmkit/node"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 )
 
 const swarmDirName = "swarm"
@@ -85,6 +85,7 @@ type Config struct {
 	Backend                executorpkg.Backend
 	ImageBackend           executorpkg.ImageBackend
 	PluginBackend          plugin.Backend
+	VolumeBackend          executorpkg.VolumeBackend
 	NetworkSubnetsProvider NetworkSubnetsProvider
 
 	// DefaultAdvertiseAddr is the default host/IP or network interface to use
@@ -303,6 +304,13 @@ func (c *Cluster) GetRemoteAddressList() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.getRemoteAddressList()
+}
+
+// GetWatchStream returns the channel to pass changes from store watch API
+func (c *Cluster) GetWatchStream() chan *swarmapi.WatchMessage {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.watchStream
 }
 
 func (c *Cluster) getRemoteAddressList() []string {

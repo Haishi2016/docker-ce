@@ -71,6 +71,12 @@ type commonBridgeConfig struct {
 	FixedCIDR string `json:"fixed-cidr,omitempty"`
 }
 
+// NetworkConfig stores the daemon-wide networking configurations
+type NetworkConfig struct {
+	// Default address pools for docker networks
+	DefaultAddressPools opts.PoolsOpt `json:"default-address-pools,omitempty"`
+}
+
 // CommonTLSOptions defines TLS configuration for the daemon server.
 // It includes json tags to deserialize configuration from a file
 // using the same names that the flags in the command line use.
@@ -173,6 +179,7 @@ type CommonConfig struct {
 
 	LogConfig
 	BridgeConfig // bridgeConfig holds bridge network specific configuration.
+	NetworkConfig
 	registry.ServiceOptions
 
 	sync.Mutex
@@ -253,6 +260,25 @@ func GetConflictFreeLabels(labels []string) ([]string, error) {
 		newLabels = append(newLabels, fmt.Sprintf("%s=%s", k, v))
 	}
 	return newLabels, nil
+}
+
+// ValidateReservedNamespaceLabels errors if the reserved namespaces com.docker.*,
+// io.docker.*, org.dockerproject.* are used in a configured engine label.
+//
+// TODO: This is a separate function because we need to warn users first of the
+// deprecation.  When we return an error, this logic can be added to Validate
+// or GetConflictFreeLabels instead of being here.
+func ValidateReservedNamespaceLabels(labels []string) error {
+	for _, label := range labels {
+		lowered := strings.ToLower(label)
+		if strings.HasPrefix(lowered, "com.docker.") || strings.HasPrefix(lowered, "io.docker.") ||
+			strings.HasPrefix(lowered, "org.dockerproject.") {
+			return fmt.Errorf(
+				"label %s not allowed: the namespaces com.docker.*, io.docker.*, and org.dockerproject.* are reserved for Docker's internal use",
+				label)
+		}
+	}
+	return nil
 }
 
 // Reload reads the configuration in the host and reloads the daemon and server.

@@ -1,5 +1,21 @@
 // +build !windows
 
+/*
+   Copyright The containerd Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package proc
 
 import (
@@ -22,6 +38,7 @@ type initState interface {
 	Resume(context.Context) error
 	Update(context.Context, *google_protobuf.Any) error
 	Checkpoint(context.Context, *CheckpointConfig) error
+	Exec(context.Context, string, *ExecConfig) (Process, error)
 }
 
 type createdState struct {
@@ -113,6 +130,12 @@ func (s *createdState) SetExited(status int) {
 	}
 }
 
+func (s *createdState) Exec(ctx context.Context, path string, r *ExecConfig) (Process, error) {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+	return s.p.exec(ctx, path, r)
+}
+
 type createdCheckpointState struct {
 	p    *Init
 	opts *runc.RestoreOpts
@@ -171,10 +194,23 @@ func (s *createdCheckpointState) Start(ctx context.Context) error {
 	s.p.mu.Lock()
 	defer s.p.mu.Unlock()
 	p := s.p
+	sio := p.stdio
+
+	var (
+		err    error
+		socket *runc.Socket
+	)
+	if sio.Terminal {
+		if socket, err = runc.NewTempConsoleSocket(); err != nil {
+			return errors.Wrap(err, "failed to create OCI runtime console socket")
+		}
+		defer socket.Close()
+		s.opts.ConsoleSocket = socket
+	}
+
 	if _, err := s.p.runtime.Restore(ctx, p.id, p.bundle, s.opts); err != nil {
 		return p.runtimeError(err, "OCI runtime restore failed")
 	}
-	sio := p.stdio
 	if sio.Stdin != "" {
 		sc, err := fifo.OpenFifo(ctx, sio.Stdin, syscall.O_WRONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
@@ -184,7 +220,17 @@ func (s *createdCheckpointState) Start(ctx context.Context) error {
 		p.closers = append(p.closers, sc)
 	}
 	var copyWaitGroup sync.WaitGroup
-	if !sio.IsNull() {
+	if socket != nil {
+		console, err := socket.ReceiveMaster()
+		if err != nil {
+			return errors.Wrap(err, "failed to retrieve console master")
+		}
+		console, err = p.platform.CopyConsole(ctx, console, sio.Stdin, sio.Stdout, sio.Stderr, &p.wg, &copyWaitGroup)
+		if err != nil {
+			return errors.Wrap(err, "failed to start console copy")
+		}
+		p.console = console
+	} else if !sio.IsNull() {
 		if err := copyPipes(ctx, p.io, sio.Stdin, sio.Stdout, sio.Stderr, &p.wg, &copyWaitGroup); err != nil {
 			return errors.Wrap(err, "failed to start io pipe copy")
 		}
@@ -196,7 +242,6 @@ func (s *createdCheckpointState) Start(ctx context.Context) error {
 		return errors.Wrap(err, "failed to retrieve OCI runtime container pid")
 	}
 	p.pid = pid
-
 	return s.transition("running")
 }
 
@@ -225,6 +270,13 @@ func (s *createdCheckpointState) SetExited(status int) {
 	if err := s.transition("stopped"); err != nil {
 		panic(err)
 	}
+}
+
+func (s *createdCheckpointState) Exec(ctx context.Context, path string, r *ExecConfig) (Process, error) {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+
+	return nil, errors.Errorf("cannot exec in a created state")
 }
 
 type runningState struct {
@@ -312,6 +364,12 @@ func (s *runningState) SetExited(status int) {
 	}
 }
 
+func (s *runningState) Exec(ctx context.Context, path string, r *ExecConfig) (Process, error) {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+	return s.p.exec(ctx, path, r)
+}
+
 type pausedState struct {
 	p *Init
 }
@@ -396,7 +454,13 @@ func (s *pausedState) SetExited(status int) {
 	if err := s.transition("stopped"); err != nil {
 		panic(err)
 	}
+}
 
+func (s *pausedState) Exec(ctx context.Context, path string, r *ExecConfig) (Process, error) {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+
+	return nil, errors.Errorf("cannot exec in a paused state")
 }
 
 type stoppedState struct {
@@ -470,4 +534,11 @@ func (s *stoppedState) Kill(ctx context.Context, sig uint32, all bool) error {
 
 func (s *stoppedState) SetExited(status int) {
 	// no op
+}
+
+func (s *stoppedState) Exec(ctx context.Context, path string, r *ExecConfig) (Process, error) {
+	s.p.mu.Lock()
+	defer s.p.mu.Unlock()
+
+	return nil, errors.Errorf("cannot exec in a stopped state")
 }

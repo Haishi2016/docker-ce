@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -13,7 +14,6 @@ import (
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"golang.org/x/net/context"
 )
 
 func TestUpdateServiceArgs(t *testing.T) {
@@ -366,7 +366,7 @@ func TestUpdateHosts(t *testing.T) {
 	assert.ErrorContains(t, flags.Set("host-add", "$example.com$"), `bad format for add-host: "$example.com$"`)
 
 	hosts := []string{"1.2.3.4 example.com", "4.3.2.1 example.org", "2001:db8:abc8::1 example.net"}
-	expected := []string{"1.2.3.4 example.com", "4.3.2.1 example.org", "2001:db8:abc8::1 ipv6.net"}
+	expected := []string{"1.2.3.4 example.com", "4.3.2.1 example.org", "2.2.2.2 example.net", "2001:db8:abc8::1 ipv6.net"}
 
 	err := updateHosts(flags, &hosts)
 	assert.NilError(t, err)
@@ -383,6 +383,60 @@ func TestUpdateHostsPreservesOrder(t *testing.T) {
 	err := updateHosts(flags, &hosts)
 	assert.NilError(t, err)
 	assert.Check(t, is.DeepEqual([]string{"127.0.0.2 foobar", "127.0.0.1 foobar", "127.0.0.3 foobar"}, hosts))
+}
+
+func TestUpdateHostsReplaceEntry(t *testing.T) {
+	flags := newUpdateCommand(nil).Flags()
+	flags.Set("host-add", "foobar:127.0.0.4")
+	flags.Set("host-rm", "foobar:127.0.0.2")
+
+	hosts := []string{"127.0.0.2 foobar", "127.0.0.1 foobar", "127.0.0.3 foobar"}
+
+	err := updateHosts(flags, &hosts)
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual([]string{"127.0.0.1 foobar", "127.0.0.3 foobar", "127.0.0.4 foobar"}, hosts))
+}
+
+func TestUpdateHostsRemoveHost(t *testing.T) {
+	flags := newUpdateCommand(nil).Flags()
+	flags.Set("host-rm", "host1")
+
+	hosts := []string{"127.0.0.2 host3 host1 host2 host4", "127.0.0.1 host1 host4", "127.0.0.3 host1"}
+
+	err := updateHosts(flags, &hosts)
+	assert.NilError(t, err)
+
+	// Removing host `host1` should remove the entry from each line it appears in.
+	// If there are no other hosts in the entry, the entry itself should be removed.
+	assert.Check(t, is.DeepEqual([]string{"127.0.0.2 host3 host2 host4", "127.0.0.1 host4"}, hosts))
+}
+
+func TestUpdateHostsRemoveHostIP(t *testing.T) {
+	flags := newUpdateCommand(nil).Flags()
+	flags.Set("host-rm", "host1:127.0.0.1")
+
+	hosts := []string{"127.0.0.2 host3 host1 host2 host4", "127.0.0.1 host1 host4", "127.0.0.3 host1", "127.0.0.1 host1"}
+
+	err := updateHosts(flags, &hosts)
+	assert.NilError(t, err)
+
+	// Removing host `host1` should remove the entry from each line it appears in,
+	// but only if the IP-address matches. If there are no other hosts in the entry,
+	// the entry itself should be removed.
+	assert.Check(t, is.DeepEqual([]string{"127.0.0.2 host3 host1 host2 host4", "127.0.0.1 host4", "127.0.0.3 host1"}, hosts))
+}
+
+func TestUpdateHostsRemoveAll(t *testing.T) {
+	flags := newUpdateCommand(nil).Flags()
+	flags.Set("host-add", "host-three:127.0.0.4")
+	flags.Set("host-add", "host-one:127.0.0.5")
+	flags.Set("host-rm", "host-one")
+
+	hosts := []string{"127.0.0.1 host-one", "127.0.0.2 host-two", "127.0.0.3 host-one"}
+
+	err := updateHosts(flags, &hosts)
+	assert.NilError(t, err)
+	assert.Check(t, is.DeepEqual([]string{"127.0.0.2 host-two", "127.0.0.4 host-three", "127.0.0.5 host-one"}, hosts))
 }
 
 func TestUpdatePortsRmWithProtocol(t *testing.T) {
@@ -531,6 +585,50 @@ func TestUpdateIsolationValid(t *testing.T) {
 	err = updateService(context.Background(), nil, flags, &spec)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(container.IsolationProcess, spec.TaskTemplate.ContainerSpec.Isolation))
+}
+
+// TestUpdateLimitsReservations tests that limits and reservations are updated,
+// and that values are not updated are not reset to their default value
+func TestUpdateLimitsReservations(t *testing.T) {
+	spec := swarm.ServiceSpec{
+		TaskTemplate: swarm.TaskSpec{
+			ContainerSpec: &swarm.ContainerSpec{},
+			Resources: &swarm.ResourceRequirements{
+				Limits: &swarm.Resources{
+					NanoCPUs:    1000000000,
+					MemoryBytes: 104857600,
+				},
+				Reservations: &swarm.Resources{
+					NanoCPUs:    1000000000,
+					MemoryBytes: 104857600,
+				},
+			},
+		},
+	}
+
+	flags := newUpdateCommand(nil).Flags()
+	err := flags.Set(flagLimitCPU, "2")
+	assert.NilError(t, err)
+	err = flags.Set(flagReserveCPU, "2")
+	assert.NilError(t, err)
+	err = updateService(context.Background(), nil, flags, &spec)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Limits.NanoCPUs, int64(2000000000)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Limits.MemoryBytes, int64(104857600)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Reservations.NanoCPUs, int64(2000000000)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Reservations.MemoryBytes, int64(104857600)))
+
+	flags = newUpdateCommand(nil).Flags()
+	err = flags.Set(flagLimitMemory, "200M")
+	assert.NilError(t, err)
+	err = flags.Set(flagReserveMemory, "200M")
+	assert.NilError(t, err)
+	err = updateService(context.Background(), nil, flags, &spec)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Limits.NanoCPUs, int64(2000000000)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Limits.MemoryBytes, int64(209715200)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Reservations.NanoCPUs, int64(2000000000)))
+	assert.Check(t, is.Equal(spec.TaskTemplate.Resources.Reservations.MemoryBytes, int64(209715200)))
 }
 
 func TestUpdateIsolationInvalid(t *testing.T) {

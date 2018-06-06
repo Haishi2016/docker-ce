@@ -53,7 +53,7 @@ func (pm *Manager) enable(p *v2.Plugin, c *controller, force bool) error {
 	}
 
 	rootFS := containerfs.NewLocalContainerFS(filepath.Join(pm.config.Root, p.PluginObj.ID, rootFSFileName))
-	if err := initlayer.Setup(rootFS, idtools.IDPair{0, 0}); err != nil {
+	if err := initlayer.Setup(rootFS, idtools.IDPair{UID: 0, GID: 0}); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -71,14 +71,20 @@ func (pm *Manager) enable(p *v2.Plugin, c *controller, force bool) error {
 
 func (pm *Manager) pluginPostStart(p *v2.Plugin, c *controller) error {
 	sockAddr := filepath.Join(pm.config.ExecRoot, p.GetID(), p.GetSocket())
-	client, err := plugins.NewClientWithTimeout("unix://"+sockAddr, nil, time.Duration(c.timeoutInSecs)*time.Second)
-	if err != nil {
-		c.restart = false
-		shutdownPlugin(p, c, pm.executor)
-		return errors.WithStack(err)
-	}
+	p.SetTimeout(time.Duration(c.timeoutInSecs) * time.Second)
+	addr := &net.UnixAddr{Net: "unix", Name: sockAddr}
+	p.SetAddr(addr)
 
-	p.SetPClient(client)
+	if p.Protocol() == plugins.ProtocolSchemeHTTPV1 {
+		client, err := plugins.NewClientWithTimeout(addr.Network()+"://"+addr.String(), nil, p.Timeout())
+		if err != nil {
+			c.restart = false
+			shutdownPlugin(p, c, pm.executor)
+			return errors.WithStack(err)
+		}
+
+		p.SetPClient(client)
+	}
 
 	// Initial sleep before net Dial to allow plugin to listen on socket.
 	time.Sleep(500 * time.Millisecond)

@@ -1,6 +1,7 @@
 package swarm
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/docker/cli/cli/command"
@@ -14,10 +15,12 @@ import (
 	apiclient "github.com/docker/docker/client"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 func deployCompose(ctx context.Context, dockerCli command.Cli, opts options.Deploy) error {
+	if err := validateStackName(opts.Namespace); err != nil {
+		return err
+	}
 	config, err := loader.LoadComposefile(dockerCli, opts)
 	if err != nil {
 		return err
@@ -209,7 +212,7 @@ func deployServices(
 	apiClient := dockerCli.Client()
 	out := dockerCli.Out()
 
-	existingServices, err := getServices(ctx, apiClient, namespace.Name())
+	existingServices, err := getStackServices(ctx, apiClient, namespace.Name())
 	if err != nil {
 		return err
 	}
@@ -248,6 +251,12 @@ func deployServices(
 				// service update.
 				serviceSpec.TaskTemplate.ContainerSpec.Image = service.Spec.TaskTemplate.ContainerSpec.Image
 			}
+
+			// Stack deploy does not have a `--force` option. Preserve existing ForceUpdate
+			// value so that tasks are not re-deployed if not updated.
+			// TODO move this to API client?
+			serviceSpec.TaskTemplate.ForceUpdate = service.Spec.TaskTemplate.ForceUpdate
+
 			response, err := apiClient.ServiceUpdate(
 				ctx,
 				service.ID,

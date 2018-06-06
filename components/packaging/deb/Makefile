@@ -4,12 +4,12 @@ ENGINE_DIR:=$(CURDIR)/../../engine
 CLI_DIR:=$(CURDIR)/../../cli
 GITCOMMIT?=$(shell cd $(ENGINE_DIR) && git rev-parse --short HEAD)
 VERSION?=0.0.0-dev
+GO_VERSION:=1.10.2
 DEB_VERSION=$(shell ./gen-deb-ver $(ENGINE_DIR) "$(VERSION)")
-DOCKER_EXPERIMENTAL:=0
 CHOWN:=docker run --rm -v $(CURDIR):/v -w /v alpine chown
 EPOCH?=
 
-BUILD=docker build -t debbuild-$@/$(ARCH) -f $(CURDIR)/$@/Dockerfile.$(ARCH) .
+BUILD=docker build --build-arg GO_VERSION=$(GO_VERSION) -t debbuild-$@/$(ARCH) -f $(CURDIR)/$@/Dockerfile.$(ARCH) .
 RUN=docker run --rm -i \
 	-e EPOCH='$(EPOCH)' \
 	-e DEB_VERSION=$(DEB_VERSION) \
@@ -37,7 +37,7 @@ deb: ubuntu debian raspbian ## build all deb packages
 ubuntu: ubuntu-bionic ubuntu-artful ubuntu-xenial ubuntu-trusty ## build all ubuntu deb packages
 
 .PHONY: debian
-debian: debian-stretch debian-wheezy debian-jessie ## build all debian deb packages
+debian: debian-stretch debian-jessie ## build all debian deb packages
 
 .PHONY: raspbian
 raspbian: raspbian-stretch debian-jessie ## build all raspbian deb packages
@@ -80,12 +80,6 @@ debian-jessie: ## build debian jessie deb packages
 
 .PHONY: debian-stretch
 debian-stretch: ## build debian stretch deb packages
-	$(BUILD)
-	$(RUN)
-	$(CHOWN) -R $(shell id -u):$(shell id -g) debbuild/$@
-
-.PHONY: debian-wheezy
-debian-wheezy: ## build debian wheezy deb packages
 	$(BUILD)
 	$(RUN)
 	$(CHOWN) -R $(shell id -u):$(shell id -g) debbuild/$@

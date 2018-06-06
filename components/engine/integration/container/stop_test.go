@@ -3,13 +3,14 @@ package container // import "github.com/docker/docker/integration/container"
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/integration/internal/container"
-	"github.com/docker/docker/integration/internal/request"
+	"github.com/docker/docker/internal/test/request"
 	"github.com/gotestyourself/gotestyourself/assert"
 	"github.com/gotestyourself/gotestyourself/icmd"
 	"github.com/gotestyourself/gotestyourself/poll"
@@ -42,8 +43,63 @@ func TestStopContainerWithRestartPolicyAlways(t *testing.T) {
 	}
 }
 
+// TestStopContainerWithTimeout checks that ContainerStop with
+// a timeout works as documented, i.e. in case of negative timeout
+// waiting is not limited (issue #35311).
+func TestStopContainerWithTimeout(t *testing.T) {
+	defer setupTest(t)()
+	client := request.NewAPIClient(t)
+	ctx := context.Background()
+
+	testCmd := container.WithCmd("sh", "-c", "sleep 2 && exit 42")
+	testData := []struct {
+		doc              string
+		timeout          int
+		expectedExitCode int
+	}{
+		// In case container is forcefully killed, 137 is returned,
+		// otherwise the exit code from the above script
+		{
+			"zero timeout: expect forceful container kill",
+			0, 137,
+		},
+		{
+			"too small timeout: expect forceful container kill",
+			1, 137,
+		},
+		{
+			"big enough timeout: expect graceful container stop",
+			3, 42,
+		},
+		{
+			"unlimited timeout: expect graceful container stop",
+			-1, 42,
+		},
+	}
+
+	for _, d := range testData {
+		d := d
+		t.Run(strconv.Itoa(d.timeout), func(t *testing.T) {
+			t.Parallel()
+			id := container.Run(t, ctx, client, testCmd)
+
+			timeout := time.Duration(d.timeout) * time.Second
+			err := client.ContainerStop(ctx, id, &timeout)
+			assert.NilError(t, err)
+
+			poll.WaitOn(t, container.IsStopped(ctx, client, id),
+				poll.WithDelay(100*time.Millisecond))
+
+			inspect, err := client.ContainerInspect(ctx, id)
+			assert.NilError(t, err)
+			assert.Equal(t, inspect.State.ExitCode, d.expectedExitCode)
+		})
+	}
+}
+
 func TestDeleteDevicemapper(t *testing.T) {
-	skip.IfCondition(t, testEnv.DaemonInfo.Driver != "devicemapper")
+	skip.If(t, testEnv.DaemonInfo.Driver != "devicemapper")
+	skip.If(t, testEnv.IsRemoteDaemon, "cannot start daemon on remote test run")
 
 	defer setupTest(t)()
 	client := request.NewAPIClient(t)

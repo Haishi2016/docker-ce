@@ -3,6 +3,7 @@ ENGINE_DIR:=$(CURDIR)/../engine
 CLI_DIR:=$(CURDIR)/../cli
 VERSION?=0.0.0-dev
 DOCKER_GITCOMMIT:=abcdefg
+GO_VERSION:=1.10.2
 
 .PHONY: help
 help: ## show make targets
@@ -15,22 +16,22 @@ clean: ## remove build artifacts
 	$(MAKE) -C static clean
 
 .PHONY: rpm
-rpm: DOCKER_BUILD_PKGS:=fedora-27 fedora-26 centos-7
+rpm: DOCKER_BUILD_PKGS:=$(shell find rpm -type d | grep ".*-.*" | sed 's/^rpm\///')
 rpm: ## build rpm packages
 	for p in $(DOCKER_BUILD_PKGS); do \
-		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) $${p}; \
+		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) GO_VERSION=$(GO_VERSION) $${p}; \
 	done
 
 .PHONY: deb
-deb: DOCKER_BUILD_PKGS:=ubuntu-xenial ubuntu-trusty debian-buster debian-stretch debian-wheezy debian-jessie raspbian-stretch raspbian-jessie
+deb: DOCKER_BUILD_PKGS:=$(shell find deb -type d | grep ".*-.*" | sed 's/^deb\///')
 deb: ## build deb packages
 	for p in $(DOCKER_BUILD_PKGS); do \
-		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) $${p}; \
+		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) GO_VERSION=$(GO_VERSION) $${p}; \
 	done
 
 .PHONY: static
 static: DOCKER_BUILD_PKGS:=static-linux cross-mac cross-win cross-arm
 static: ## build static-compiled packages
 	for p in $(DOCKER_BUILD_PKGS); do \
-		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) $${p}; \
+		$(MAKE) -C $@ VERSION=$(VERSION) ENGINE_DIR=$(ENGINE_DIR) CLI_DIR=$(CLI_DIR) GO_VERSION=$(GO_VERSION) $${p}; \
 	done

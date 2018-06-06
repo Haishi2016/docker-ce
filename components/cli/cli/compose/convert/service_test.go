@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"context"
 	"os"
 	"sort"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 func TestConvertRestartPolicyFromNone(t *testing.T) {
@@ -549,4 +549,18 @@ func (c *fakeClient) ConfigList(ctx context.Context, options types.ConfigListOpt
 		return c.configListFunc(options)
 	}
 	return []swarm.Config{}, nil
+}
+
+func TestConvertUpdateConfigParallelism(t *testing.T) {
+	parallel := uint64(4)
+
+	// test default behavior
+	updateConfig := convertUpdateConfig(&composetypes.UpdateConfig{})
+	assert.Check(t, is.Equal(uint64(1), updateConfig.Parallelism))
+
+	// Non default value
+	updateConfig = convertUpdateConfig(&composetypes.UpdateConfig{
+		Parallelism: &parallel,
+	})
+	assert.Check(t, is.Equal(parallel, updateConfig.Parallelism))
 }

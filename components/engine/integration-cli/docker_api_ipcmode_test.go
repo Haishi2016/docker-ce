@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"github.com/docker/docker/integration-cli/checker"
 	"github.com/docker/docker/integration-cli/cli"
 	"github.com/go-check/check"
-	"golang.org/x/net/context"
 )
 
 /* testIpcCheckDevExists checks whether a given mount (identified by its
@@ -88,7 +88,7 @@ func testIpcNonePrivateShareable(c *check.C, mode string, mustBeMounted bool, mu
  * /dev/shm mount inside the container.
  */
 func (s *DockerSuite) TestAPIIpcModeNone(c *check.C) {
-	testRequires(c, DaemonIsLinux)
+	testRequires(c, DaemonIsLinux, MinimumAPIVersion("1.32"))
 	testIpcNonePrivateShareable(c, "none", false, false)
 }
 
@@ -173,7 +173,7 @@ func (s *DockerSuite) TestAPIIpcModeShareableAndContainer(c *check.C) {
  * --ipc container:ID can NOT use IPC of another private container.
  */
 func (s *DockerSuite) TestAPIIpcModePrivateAndContainer(c *check.C) {
-	testRequires(c, DaemonIsLinux)
+	testRequires(c, DaemonIsLinux, MinimumAPIVersion("1.32"))
 	testIpcContainer(s, c, "private", false)
 }
 

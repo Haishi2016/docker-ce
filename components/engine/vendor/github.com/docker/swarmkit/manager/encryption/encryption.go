@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/docker/swarmkit/api"
-	"github.com/docker/swarmkit/fips"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pkg/errors"
 )
@@ -80,19 +79,21 @@ type MultiDecrypter struct {
 }
 
 // Decrypt tries to decrypt using any decrypters that match the given algorithm.
-func (m MultiDecrypter) Decrypt(r api.MaybeEncryptedRecord) (result []byte, err error) {
+func (m MultiDecrypter) Decrypt(r api.MaybeEncryptedRecord) ([]byte, error) {
 	decrypters, ok := m.decrypters[r.Algorithm]
 	if !ok {
 		return nil, fmt.Errorf("cannot decrypt record encrypted using %s",
 			api.MaybeEncryptedRecord_Algorithm_name[int32(r.Algorithm)])
 	}
+	var rerr error
 	for _, d := range decrypters {
-		result, err = d.Decrypt(r)
+		result, err := d.Decrypt(r)
 		if err == nil {
-			return
+			return result, nil
 		}
+		rerr = err
 	}
-	return
+	return nil, rerr
 }
 
 // NewMultiDecrypter returns a new MultiDecrypter given multiple Decrypters.  If any of
@@ -150,10 +151,11 @@ func Encrypt(plaintext []byte, encrypter Encrypter) ([]byte, error) {
 	return data, nil
 }
 
-// Defaults returns a default encrypter and decrypter
-func Defaults(key []byte) (Encrypter, Decrypter) {
+// Defaults returns a default encrypter and decrypter.  If the FIPS parameter is set to
+// true, the only algorithm supported on both the encrypter and decrypter will be fernet.
+func Defaults(key []byte, fips bool) (Encrypter, Decrypter) {
 	f := NewFernet(key)
-	if fips.Enabled() {
+	if fips {
 		return f, f
 	}
 	n := NewNACLSecretbox(key)

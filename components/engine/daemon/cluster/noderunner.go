@@ -1,6 +1,7 @@
 package cluster // import "github.com/docker/docker/daemon/cluster"
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -15,7 +16,6 @@ import (
 	swarmnode "github.com/docker/swarmkit/node"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -123,7 +123,9 @@ func (n *nodeRunner) start(conf nodeStartConfig) error {
 		Executor: container.NewExecutor(
 			n.cluster.config.Backend,
 			n.cluster.config.PluginBackend,
-			n.cluster.config.ImageBackend),
+			n.cluster.config.ImageBackend,
+			n.cluster.config.VolumeBackend,
+		),
 		HeartbeatTick: n.cluster.config.RaftHeartbeatTick,
 		// Recommended value in etcd/raft is 10 x (HeartbeatTick).
 		// Lower values were seen to have caused instability because of

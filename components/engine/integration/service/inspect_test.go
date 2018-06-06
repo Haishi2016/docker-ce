@@ -1,6 +1,7 @@
 package service // import "github.com/docker/docker/integration/service"
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
 	"github.com/gotestyourself/gotestyourself/poll"
 	"github.com/gotestyourself/gotestyourself/skip"
-	"golang.org/x/net/context"
 )
 
 func TestInspect(t *testing.T) {
@@ -23,8 +23,8 @@ func TestInspect(t *testing.T) {
 	defer setupTest(t)()
 	d := swarm.NewSwarm(t, testEnv)
 	defer d.Stop(t)
-	client, err := client.NewClientWithOpts(client.WithHost((d.Sock())))
-	assert.NilError(t, err)
+	client := d.NewClientT(t)
+	defer client.Close()
 
 	var now = time.Now()
 	var instances uint64 = 2

@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sort"
@@ -13,9 +14,9 @@ import (
 	"github.com/docker/cli/kubernetes"
 	"github.com/docker/cli/templates"
 	"github.com/docker/docker/api/types"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/context"
 	kubernetesClient "k8s.io/client-go/kubernetes"
 )
 
@@ -48,7 +49,7 @@ Server:{{if ne .Platform.Name ""}} {{.Platform.Name}}{{end}}
   Version:	{{$component.Version}}
   {{- $detailsOrder := getDetailsOrder $component}}
   {{- range $key := $detailsOrder}}
-  {{$key}}:		{{index $component.Details $key}}
+  {{$key}}:	{{index $component.Details $key}}
    {{- end}}
   {{- end}}
  {{- end}}
@@ -108,7 +109,6 @@ func NewVersionCommand(dockerCli command.Cli) *cobra.Command {
 	flags.StringVarP(&opts.format, "format", "f", "", "Format the output using the given Go template")
 	flags.StringVarP(&opts.kubeConfig, "kubeconfig", "k", "", "Kubernetes config file")
 	flags.SetAnnotation("kubeconfig", "kubernetes", nil)
-	flags.SetAnnotation("kubeconfig", "experimentalCLI", nil)
 
 	return cmd
 }
@@ -122,19 +122,10 @@ func reformatDate(buildTime string) string {
 }
 
 func runVersion(dockerCli command.Cli, opts *versionOptions) error {
-	templateFormat := versionTemplate
-	tmpl := templates.New("version")
-	if opts.format != "" {
-		templateFormat = opts.format
-	} else {
-		tmpl = tmpl.Funcs(template.FuncMap{"getDetailsOrder": getDetailsOrder})
-	}
-
 	var err error
-	tmpl, err = tmpl.Parse(templateFormat)
+	tmpl, err := newVersionTemplate(opts.format)
 	if err != nil {
-		return cli.StatusError{StatusCode: 64,
-			Status: "Template parsing error: " + err.Error()}
+		return cli.StatusError{StatusCode: 64, Status: err.Error()}
 	}
 
 	vd := versionInfo{
@@ -201,13 +192,28 @@ func runVersion(dockerCli command.Cli, opts *versionOptions) error {
 			})
 		}
 	}
-	t := tabwriter.NewWriter(dockerCli.Out(), 15, 1, 1, ' ', 0)
-	if err2 := tmpl.Execute(t, vd); err2 != nil && err == nil {
+	if err2 := prettyPrintVersion(dockerCli, vd, tmpl); err2 != nil && err == nil {
 		err = err2
 	}
+	return err
+}
+
+func prettyPrintVersion(dockerCli command.Cli, vd versionInfo, tmpl *template.Template) error {
+	t := tabwriter.NewWriter(dockerCli.Out(), 15, 1, 1, ' ', 0)
+	err := tmpl.Execute(t, vd)
 	t.Write([]byte("\n"))
 	t.Flush()
 	return err
+}
+
+func newVersionTemplate(templateFormat string) (*template.Template, error) {
+	if templateFormat == "" {
+		templateFormat = versionTemplate
+	}
+	tmpl := templates.New("version").Funcs(template.FuncMap{"getDetailsOrder": getDetailsOrder})
+	tmpl, err := tmpl.Parse(templateFormat)
+
+	return tmpl, errors.Wrap(err, "Template parsing error")
 }
 
 func getDetailsOrder(v types.ComponentVersion) []string {
@@ -228,7 +234,8 @@ func getKubernetesVersion(dockerCli command.Cli, kubeConfig string) *kubernetesV
 		Kubernetes: "Unknown",
 		StackAPI:   "Unknown",
 	}
-	config, err := kubernetes.NewKubernetesConfig(kubeConfig)
+	clientConfig := kubernetes.NewKubernetesConfig(kubeConfig)
+	config, err := clientConfig.ClientConfig()
 	if err != nil {
 		logrus.Debugf("failed to get Kubernetes configuration: %s", err)
 		return &version

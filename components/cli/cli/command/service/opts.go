@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -18,7 +19,6 @@ import (
 	gogotypes "github.com/gogo/protobuf/types"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
-	"golang.org/x/net/context"
 )
 
 type int64Value interface {
@@ -645,7 +645,7 @@ func (options *serviceOptions) ToService(ctx context.Context, apiClient client.N
 		},
 		Mode:           serviceMode,
 		UpdateConfig:   options.update.updateConfig(flags),
-		RollbackConfig: options.update.rollbackConfig(flags),
+		RollbackConfig: options.rollback.rollbackConfig(flags),
 		EndpointSpec:   options.endpoint.ToEndpointSpec(),
 	}
 

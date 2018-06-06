@@ -1,6 +1,7 @@
 package client // import "github.com/docker/docker/client"
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -8,8 +9,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/versions"
-	"golang.org/x/net/context"
-	"github.com/sirupsen/logrus"
 )
 
 type configWrapper struct {
@@ -42,8 +41,6 @@ func (cli *Client) ContainerCreate(ctx context.Context, config *container.Config
 		HostConfig:       hostConfig,
 		NetworkingConfig: networkingConfig,
 	}
-
-	logrus.Debugf("BODY+++++++++++++++++++++++++++++++ %v", body)
 
 	serverResp, err := cli.post(ctx, "/containers/create", query, body, nil)
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/locker"
 	"github.com/docker/docker/pkg/mount"
-	units "github.com/docker/go-units"
+	"github.com/docker/go-units"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -246,7 +246,7 @@ func (d *Driver) Put(id string) error {
 
 	err := d.DeviceSet.UnmountDevice(id, mp)
 	if err != nil {
-		logrus.Errorf("devmapper: Error unmounting device %s: %v", id, err)
+		logrus.WithField("storage-driver", "devicemapper").Errorf("Error unmounting device %s: %v", id, err)
 	}
 
 	return err

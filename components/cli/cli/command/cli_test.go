@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"crypto/x509"
 	"os"
 	"runtime"
@@ -14,9 +15,9 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
+	"github.com/gotestyourself/gotestyourself/env"
 	"github.com/gotestyourself/gotestyourself/fs"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 func TestNewAPIClientFromFlags(t *testing.T) {
@@ -44,26 +45,13 @@ func TestNewAPIClientFromFlags(t *testing.T) {
 
 func TestNewAPIClientFromFlagsWithAPIVersionFromEnv(t *testing.T) {
 	customVersion := "v3.3.3"
-	defer patchEnvVariable(t, "DOCKER_API_VERSION", customVersion)()
+	defer env.Patch(t, "DOCKER_API_VERSION", customVersion)()
 
 	opts := &flags.CommonOptions{}
 	configFile := &configfile.ConfigFile{}
 	apiclient, err := NewAPIClientFromFlags(opts, configFile)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(customVersion, apiclient.ClientVersion()))
-}
-
-// TODO: use gotestyourself/env.Patch
-func patchEnvVariable(t *testing.T, key, value string) func() {
-	oldValue, ok := os.LookupEnv(key)
-	assert.NilError(t, os.Setenv(key, value))
-	return func() {
-		if !ok {
-			assert.NilError(t, os.Unsetenv(key))
-			return
-		}
-		assert.NilError(t, os.Setenv(key, oldValue))
-	}
 }
 
 type fakeClient struct {
@@ -183,72 +171,71 @@ func TestOrchestratorSwitch(t *testing.T) {
 		flagOrchestrator     string
 		expectedOrchestrator string
 		expectedKubernetes   bool
+		expectedSwarm        bool
 	}{
 		{
 			doc: "default",
 			configfile: `{
-				"experimental": "enabled"
 			}`,
 			expectedOrchestrator: "swarm",
 			expectedKubernetes:   false,
-		},
-		{
-			doc: "kubernetesIsExperimental",
-			configfile: `{
-				"experimental": "disabled",
-				"orchestrator": "kubernetes"
-			}`,
-			envOrchestrator:      "kubernetes",
-			flagOrchestrator:     "kubernetes",
-			expectedOrchestrator: "swarm",
-			expectedKubernetes:   false,
+			expectedSwarm:        true,
 		},
 		{
 			doc: "kubernetesConfigFile",
 			configfile: `{
-				"experimental": "enabled",
 				"orchestrator": "kubernetes"
 			}`,
 			expectedOrchestrator: "kubernetes",
 			expectedKubernetes:   true,
+			expectedSwarm:        false,
 		},
 		{
 			doc: "kubernetesEnv",
 			configfile: `{
-				"experimental": "enabled"
 			}`,
 			envOrchestrator:      "kubernetes",
 			expectedOrchestrator: "kubernetes",
 			expectedKubernetes:   true,
+			expectedSwarm:        false,
 		},
 		{
 			doc: "kubernetesFlag",
 			configfile: `{
-				"experimental": "enabled"
 			}`,
 			flagOrchestrator:     "kubernetes",
 			expectedOrchestrator: "kubernetes",
 			expectedKubernetes:   true,
+			expectedSwarm:        false,
+		},
+		{
+			doc: "allOrchestratorFlag",
+			configfile: `{
+			}`,
+			flagOrchestrator:     "all",
+			expectedOrchestrator: "all",
+			expectedKubernetes:   true,
+			expectedSwarm:        true,
 		},
 		{
 			doc: "envOverridesConfigFile",
 			configfile: `{
-				"experimental": "enabled",
 				"orchestrator": "kubernetes"
 			}`,
 			envOrchestrator:      "swarm",
 			expectedOrchestrator: "swarm",
 			expectedKubernetes:   false,
+			expectedSwarm:        true,
 		},
 		{
 			doc: "flagOverridesEnv",
 			configfile: `{
-				"experimental": "enabled"
 			}`,
 			envOrchestrator:      "kubernetes",
 			flagOrchestrator:     "swarm",
 			expectedOrchestrator: "swarm",
 			expectedKubernetes:   false,
+			expectedSwarm:        true,
 		},
 	}
 
@@ -260,7 +247,7 @@ func TestOrchestratorSwitch(t *testing.T) {
 				version: defaultVersion,
 			}
 			if testcase.envOrchestrator != "" {
-				defer patchEnvVariable(t, "DOCKER_ORCHESTRATOR", testcase.envOrchestrator)()
+				defer env.Patch(t, "DOCKER_ORCHESTRATOR", testcase.envOrchestrator)()
 			}
 
 			cli := &DockerCli{client: apiclient, err: os.Stderr}
@@ -272,6 +259,7 @@ func TestOrchestratorSwitch(t *testing.T) {
 			err := cli.Initialize(options)
 			assert.NilError(t, err)
 			assert.Check(t, is.Equal(testcase.expectedKubernetes, cli.ClientInfo().HasKubernetes()))
+			assert.Check(t, is.Equal(testcase.expectedSwarm, cli.ClientInfo().HasSwarm()))
 			assert.Check(t, is.Equal(testcase.expectedOrchestrator, string(cli.ClientInfo().Orchestrator)))
 		})
 	}

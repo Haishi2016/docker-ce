@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http/httputil"
@@ -21,7 +22,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"golang.org/x/net/context"
 )
 
 type runOptions struct {
@@ -125,9 +125,6 @@ func runContainer(dockerCli command.Cli, opts *runOptions, copts *containerOptio
 	stdout, stderr := dockerCli.Out(), dockerCli.Err()
 	client := dockerCli.Client()
 
-	// TODO: pass this as an argument
-	cmdPath := "run"
-
 	warnOnOomKillDisable(*hostConfig, stderr)
 	warnOnLocalhostDNS(*hostConfig, stderr)
 
@@ -161,10 +158,11 @@ func runContainer(dockerCli command.Cli, opts *runOptions, copts *containerOptio
 	}
 
 	ctx, cancelFun := context.WithCancel(context.Background())
+	defer cancelFun()
 
 	createResponse, err := createContainer(ctx, dockerCli, containerConfig, &opts.createOptions)
 	if err != nil {
-		reportError(stderr, cmdPath, err.Error(), true)
+		reportError(stderr, "run", err.Error(), true)
 		return runStartContainerErr(err)
 	}
 	if opts.sigProxy {
@@ -210,7 +208,7 @@ func runContainer(dockerCli command.Cli, opts *runOptions, copts *containerOptio
 			<-errCh
 		}
 
-		reportError(stderr, cmdPath, err.Error(), false)
+		reportError(stderr, "run", err.Error(), false)
 		if copts.autoRemove {
 			// wait container to be removed
 			<-statusChan

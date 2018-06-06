@@ -40,6 +40,7 @@ Options:
   -D, --debug                                 Enable debug mode
       --default-gateway ip                    Container default gateway IPv4 address
       --default-gateway-v6 ip                 Container default gateway IPv6 address
+      --default-address-pool                  Set the default address pool for local node networks
       --default-runtime string                Default OCI runtime for containers (default "runc")
       --default-ulimit ulimit                 Default ulimits for containers (default [])
       --dns list                              DNS server to use (default [])
@@ -1348,7 +1349,9 @@ This is a full example of the allowed configuration options on Linux:
 				"--debug"
 			]
 		}
-	}
+	},
+	"default-address-pools":[{"base":"172.80.0.0/16","size":24},
+	{"base":"172.90.0.0/16","size":24}]
 }
 ```
 
@@ -1422,7 +1425,7 @@ The list of currently supported options that can be reconfigured is this:
 - `cluster-store-opts`: it uses the new options to reload the discovery store.
 - `cluster-advertise`: it modifies the address advertised after reloading.
 - `labels`: it replaces the daemon labels with a new set of labels.
-- `live-restore`: Enables [keeping containers alive during daemon downtime](https://docs.docker.com/engine/admin/live-restore/).
+- `live-restore`: Enables [keeping containers alive during daemon downtime](https://docs.docker.com/config/containers/live-restore/).
 - `max-concurrent-downloads`: it updates the max concurrent downloads for each pull.
 - `max-concurrent-uploads`: it updates the max concurrent uploads for each push.
 - `default-runtime`: it updates the runtime to be used if not is

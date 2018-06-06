@@ -1,4 +1,4 @@
-version: "3.6"
+version: "3.7"
 
 services:
   foo:
@@ -29,6 +29,14 @@ services:
     command: bundle exec thin -p 3000
     # command: ["bundle", "exec", "thin", "-p", "3000"]
 
+    configs:
+      - config1
+      - source: config2
+        target: /my_config
+        uid: '103'
+        gid: '103'
+        mode: 0440
+
     container_name: my-web-container
 
     depends_on:
@@ -39,6 +47,13 @@ services:
       mode: replicated
       replicas: 6
       labels: [FOO=BAR]
+      rollback_config:
+        parallelism: 3
+        delay: 10s
+        failure_action: continue
+        monitor: 60s
+        max_failure_ratio: 0.3
+        order: start-first
       update_config:
         parallelism: 3
         delay: 10s
@@ -206,6 +221,14 @@ services:
 
     restart: always
 
+    secrets:
+      - secret1
+      - source: secret2
+        target: my_secret
+        uid: '103'
+        gid: '103'
+        mode: 0440
+
     security_opt:
       - label=level:s0:c100,c200
       - label=type:svirt_apache_t
@@ -282,6 +305,9 @@ networks:
       - subnet: 2001:3984:3989::/64
         # gateway: 2001:3984:3989::1
 
+    labels:
+      foo: bar
+
   external-network:
     # Specifies that a pre-existing network called "external-network"
     # can be referred to within this file as "external-network"
@@ -306,6 +332,8 @@ volumes:
       # Values can be strings or numbers
       foo: "bar"
       baz: 1
+    labels:
+      foo: bar
 
   another-volume:
     name: "user_specified_name"
@@ -333,3 +361,29 @@ volumes:
     # can be referred to within this file as "external-volume3"
     name: this-is-volume3
     external: true
+
+configs:
+  config1:
+    file: ./config_data
+    labels:
+      foo: bar
+  config2:
+    external:
+      name: my_config
+  config3:
+    external: true
+  config4:
+    name: foo
+
+secrets:
+  secret1:
+    file: ./secret_data
+    labels:
+      foo: bar
+  secret2:
+    external:
+      name: my_secret
+  secret3:
+    external: true
+  secret4:
+    name: bar

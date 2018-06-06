@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/docker/cli/cli"
@@ -9,7 +10,6 @@ import (
 	"github.com/docker/docker/registry"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/context"
 )
 
 type createOpts struct {
@@ -21,7 +21,7 @@ func newCreateListCommand(dockerCli command.Cli) *cobra.Command {
 	opts := createOpts{}
 
 	cmd := &cobra.Command{
-		Use:   "create MANFEST_LIST MANIFEST [MANIFEST...]",
+		Use:   "create MANIFEST_LIST MANIFEST [MANIFEST...]",
 		Short: "Create a local manifest list for annotating and pushing to a registry",
 		Args:  cli.RequiresMinArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -30,7 +30,7 @@ func newCreateListCommand(dockerCli command.Cli) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.BoolVar(&opts.insecure, "insecure", false, "allow communication with an insecure registry")
+	flags.BoolVar(&opts.insecure, "insecure", false, "Allow communication with an insecure registry")
 	flags.BoolVarP(&opts.amend, "amend", "a", false, "Amend an existing manifest list")
 	return cmd
 }

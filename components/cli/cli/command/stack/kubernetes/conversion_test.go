@@ -19,7 +19,7 @@ func TestReplicasConversionNeedsAService(t *testing.T) {
 		Items: []appsv1beta2.ReplicaSet{makeReplicaSet("unknown", 0, 0)},
 	}
 	services := apiv1.ServiceList{}
-	_, _, err := replicasToServices(&replicas, &services)
+	_, _, err := convertToServices(&replicas, &appsv1beta2.DaemonSetList{}, &services)
 	assert.ErrorContains(t, err, "could not find service")
 }
 
@@ -50,8 +50,8 @@ func TestKubernetesServiceToSwarmServiceConversion(t *testing.T) {
 				makeSwarmService("stack_service2", "uid2", nil),
 			},
 			map[string]formatter.ServiceListInfo{
-				"uid1": {"replicated", "2/5"},
-				"uid2": {"replicated", "3/3"},
+				"uid1": {Mode: "replicated", Replicas: "2/5"},
+				"uid2": {Mode: "replicated", Replicas: "3/3"},
 			},
 		},
 		// Headless service and LoadBalancer Service are tied to the same Swarm service
@@ -84,7 +84,7 @@ func TestKubernetesServiceToSwarmServiceConversion(t *testing.T) {
 				}),
 			},
 			map[string]formatter.ServiceListInfo{
-				"uid1": {"replicated", "1/1"},
+				"uid1": {Mode: "replicated", Replicas: "1/1"},
 			},
 		},
 		// Headless service and NodePort Service are tied to the same Swarm service
@@ -118,13 +118,13 @@ func TestKubernetesServiceToSwarmServiceConversion(t *testing.T) {
 				}),
 			},
 			map[string]formatter.ServiceListInfo{
-				"uid1": {"replicated", "1/1"},
+				"uid1": {Mode: "replicated", Replicas: "1/1"},
 			},
 		},
 	}
 
 	for _, tc := range testCases {
-		swarmServices, listInfo, err := replicasToServices(tc.replicas, tc.services)
+		swarmServices, listInfo, err := convertToServices(tc.replicas, &appsv1beta2.DaemonSetList{}, tc.services)
 		assert.NilError(t, err)
 		assert.DeepEqual(t, tc.expectedServices, swarmServices)
 		assert.DeepEqual(t, tc.expectedListInfo, listInfo)

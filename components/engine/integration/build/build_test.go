@@ -13,8 +13,8 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/versions"
-	"github.com/docker/docker/integration-cli/cli/build/fakecontext"
-	"github.com/docker/docker/integration/internal/request"
+	"github.com/docker/docker/internal/test/fakecontext"
+	"github.com/docker/docker/internal/test/request"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
@@ -136,6 +136,7 @@ func buildContainerIdsFilter(buildOutput io.Reader) (filters.Args, error) {
 }
 
 func TestBuildMultiStageParentConfig(t *testing.T) {
+	skip.If(t, versions.LessThan(testEnv.DaemonAPIVersion(), "1.35"), "broken in earlier versions")
 	dockerfile := `
 		FROM busybox AS stage0
 		ENV WHO=parent
@@ -172,6 +173,82 @@ func TestBuildMultiStageParentConfig(t *testing.T) {
 	assert.Check(t, is.Contains(image.Config.Env, "WHO=parent"))
 }
 
+// Test cases in #36996
+func TestBuildLabelWithTargets(t *testing.T) {
+	skip.If(t, versions.LessThan(testEnv.DaemonAPIVersion(), "1.38"), "test added after 1.38")
+	bldName := "build-a"
+	testLabels := map[string]string{
+		"foo":  "bar",
+		"dead": "beef",
+	}
+
+	dockerfile := `
+		FROM busybox AS target-a
+		CMD ["/dev"]
+		LABEL label-a=inline-a
+		FROM busybox AS target-b
+		CMD ["/dist"]
+		LABEL label-b=inline-b
+		`
+
+	ctx := context.Background()
+	source := fakecontext.New(t, "", fakecontext.WithDockerfile(dockerfile))
+	defer source.Close()
+
+	apiclient := testEnv.APIClient()
+	// For `target-a` build
+	resp, err := apiclient.ImageBuild(ctx,
+		source.AsTarReader(t),
+		types.ImageBuildOptions{
+			Remove:      true,
+			ForceRemove: true,
+			Tags:        []string{bldName},
+			Labels:      testLabels,
+			Target:      "target-a",
+		})
+	assert.NilError(t, err)
+	_, err = io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
+	assert.NilError(t, err)
+
+	image, _, err := apiclient.ImageInspectWithRaw(ctx, bldName)
+	assert.NilError(t, err)
+
+	testLabels["label-a"] = "inline-a"
+	for k, v := range testLabels {
+		x, ok := image.Config.Labels[k]
+		assert.Assert(t, ok)
+		assert.Assert(t, x == v)
+	}
+
+	// For `target-b` build
+	bldName = "build-b"
+	delete(testLabels, "label-a")
+	resp, err = apiclient.ImageBuild(ctx,
+		source.AsTarReader(t),
+		types.ImageBuildOptions{
+			Remove:      true,
+			ForceRemove: true,
+			Tags:        []string{bldName},
+			Labels:      testLabels,
+			Target:      "target-b",
+		})
+	assert.NilError(t, err)
+	_, err = io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
+	assert.NilError(t, err)
+
+	image, _, err = apiclient.ImageInspectWithRaw(ctx, bldName)
+	assert.NilError(t, err)
+
+	testLabels["label-b"] = "inline-b"
+	for k, v := range testLabels {
+		x, ok := image.Config.Labels[k]
+		assert.Assert(t, ok)
+		assert.Assert(t, x == v)
+	}
+}
+
 func TestBuildWithEmptyLayers(t *testing.T) {
 	dockerfile := `
 		FROM    busybox
@@ -204,6 +281,7 @@ func TestBuildWithEmptyLayers(t *testing.T) {
 // multiple subsequent stages
 // #35652
 func TestBuildMultiStageOnBuild(t *testing.T) {
+	skip.If(t, versions.LessThan(testEnv.DaemonAPIVersion(), "1.33"), "broken in earlier versions")
 	defer setupTest(t)()
 	// test both metadata and layer based commands as they may be implemented differently
 	dockerfile := `FROM busybox AS stage1
@@ -365,7 +443,7 @@ type buildLine struct {
 }
 
 func getImageIDsFromBuild(output []byte) ([]string, error) {
-	ids := []string{}
+	var ids []string
 	for _, line := range bytes.Split(output, []byte("\n")) {
 		if len(line) == 0 {
 			continue

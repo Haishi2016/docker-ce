@@ -45,6 +45,39 @@ func TestValidateAllowsXTopLevelFields(t *testing.T) {
 	assert.NilError(t, err)
 }
 
+func TestValidateAllowsXFields(t *testing.T) {
+	config := dict{
+		"version": "3.7",
+		"services": dict{
+			"bar": dict{
+				"x-extra-stuff": dict{},
+			},
+		},
+		"volumes": dict{
+			"bar": dict{
+				"x-extra-stuff": dict{},
+			},
+		},
+		"networks": dict{
+			"bar": dict{
+				"x-extra-stuff": dict{},
+			},
+		},
+		"configs": dict{
+			"bar": dict{
+				"x-extra-stuff": dict{},
+			},
+		},
+		"secrets": dict{
+			"bar": dict{
+				"x-extra-stuff": dict{},
+			},
+		},
+	}
+	err := Validate(config, "3.7")
+	assert.NilError(t, err)
+}
+
 func TestValidateSecretConfigNames(t *testing.T) {
 	config := dict{
 		"version": "3.5",
@@ -113,4 +146,93 @@ func TestValidateIsolation(t *testing.T) {
 		},
 	}
 	assert.NilError(t, Validate(config, "3.5"))
+}
+
+func TestValidateRollbackConfig(t *testing.T) {
+	config := dict{
+		"version": "3.4",
+		"services": dict{
+			"foo": dict{
+				"image": "busybox",
+				"deploy": dict{
+					"rollback_config": dict{
+						"parallelism": 1,
+					},
+				},
+			},
+		},
+	}
+
+	assert.NilError(t, Validate(config, "3.7"))
+}
+
+func TestValidateRollbackConfigWithOrder(t *testing.T) {
+	config := dict{
+		"version": "3.4",
+		"services": dict{
+			"foo": dict{
+				"image": "busybox",
+				"deploy": dict{
+					"rollback_config": dict{
+						"parallelism": 1,
+						"order":       "start-first",
+					},
+				},
+			},
+		},
+	}
+
+	assert.NilError(t, Validate(config, "3.7"))
+}
+
+func TestValidateRollbackConfigWithUpdateConfig(t *testing.T) {
+	config := dict{
+		"version": "3.4",
+		"services": dict{
+			"foo": dict{
+				"image": "busybox",
+				"deploy": dict{
+					"update_config": dict{
+						"parallelism": 1,
+						"order":       "start-first",
+					},
+					"rollback_config": dict{
+						"parallelism": 1,
+						"order":       "start-first",
+					},
+				},
+			},
+		},
+	}
+
+	assert.NilError(t, Validate(config, "3.7"))
+}
+
+func TestValidateRollbackConfigWithUpdateConfigFull(t *testing.T) {
+	config := dict{
+		"version": "3.4",
+		"services": dict{
+			"foo": dict{
+				"image": "busybox",
+				"deploy": dict{
+					"update_config": dict{
+						"parallelism":    1,
+						"order":          "start-first",
+						"delay":          "10s",
+						"failure_action": "pause",
+						"monitor":        "10s",
+					},
+					"rollback_config": dict{
+						"parallelism":    1,
+						"order":          "start-first",
+						"delay":          "10s",
+						"failure_action": "pause",
+						"monitor":        "10s",
+					},
+				},
+			},
+		},
+	}
+
+	assert.NilError(t, Validate(config, "3.7"))
 }

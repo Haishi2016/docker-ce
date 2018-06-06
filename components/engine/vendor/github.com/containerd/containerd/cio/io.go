@@ -1,3 +1,19 @@
+/*
+   Copyright The containerd Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package cio
 
 import (
@@ -5,8 +21,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
+
+	"github.com/containerd/containerd/defaults"
 )
+
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		buffer := make([]byte, 32<<10)
+		return &buffer
+	},
+}
 
 // Config holds the IO configurations.
 type Config struct {
@@ -68,6 +94,7 @@ type Streams struct {
 	Stdout   io.Writer
 	Stderr   io.Writer
 	Terminal bool
+	FIFODir  string
 }
 
 // Opt customize options for creating a Creator or Attach
@@ -92,16 +119,25 @@ func WithStreams(stdin io.Reader, stdout, stderr io.Writer) Opt {
 	}
 }
 
+// WithFIFODir sets the fifo directory.
+// e.g. "/run/containerd/fifo", "/run/users/1001/containerd/fifo"
+func WithFIFODir(dir string) Opt {
+	return func(opt *Streams) {
+		opt.FIFODir = dir
+	}
+}
+
 // NewCreator returns an IO creator from the options
 func NewCreator(opts ...Opt) Creator {
 	streams := &Streams{}
 	for _, opt := range opts {
 		opt(streams)
 	}
+	if streams.FIFODir == "" {
+		streams.FIFODir = defaults.DefaultFIFODir
+	}
 	return func(id string) (IO, error) {
-		// TODO: accept root as a param
-		root := "/run/containerd/fifo"
-		fifos, err := NewFIFOSetInDir(root, id, streams.Terminal)
+		fifos, err := NewFIFOSetInDir(streams.FIFODir, id, streams.Terminal)
 		if err != nil {
 			return nil, err
 		}
@@ -178,3 +214,44 @@ type DirectIO struct {
 }
 
 var _ IO = &DirectIO{}
+
+// LogFile creates a file on disk that logs the task's STDOUT,STDERR.
+// If the log file already exists, the logs will be appended to the file.
+func LogFile(path string) Creator {
+	return func(_ string) (IO, error) {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return nil, err
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, err
+		}
+		f.Close()
+		return &logIO{
+			config: Config{
+				Stdout: path,
+				Stderr: path,
+			},
+		}, nil
+	}
+}
+
+type logIO struct {
+	config Config
+}
+
+func (l *logIO) Config() Config {
+	return l.config
+}
+
+func (l *logIO) Cancel() {
+
+}
+
+func (l *logIO) Wait() {
+
+}
+
+func (l *logIO) Close() error {
+	return nil
+}

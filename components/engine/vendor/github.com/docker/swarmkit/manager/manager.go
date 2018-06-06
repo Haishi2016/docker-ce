@@ -121,6 +121,11 @@ type Config struct {
 
 	// PluginGetter provides access to docker's plugin inventory.
 	PluginGetter plugingetter.PluginGetter
+
+	// FIPS is a boolean stating whether the node is FIPS enabled - if this is the
+	// first node in the cluster, this setting is used to set the cluster-wide mandatory
+	// FIPS setting.
+	FIPS bool
 }
 
 // Manager is the cluster manager for Swarm.
@@ -208,7 +213,7 @@ func New(config *Config) (*Manager, error) {
 		raftCfg.HeartbeatTick = int(config.HeartbeatTick)
 	}
 
-	dekRotator, err := NewRaftDEKManager(config.SecurityConfig.KeyWriter())
+	dekRotator, err := NewRaftDEKManager(config.SecurityConfig.KeyWriter(), config.FIPS)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +227,7 @@ func New(config *Config) (*Manager, error) {
 		ForceNewCluster: config.ForceNewCluster,
 		TLSCredentials:  config.SecurityConfig.ClientTLSCreds,
 		KeyRotator:      dekRotator,
+		FIPS:            config.FIPS,
 	}
 	raftNode := raft.NewNode(newNodeOpts)
 
@@ -263,7 +269,7 @@ func New(config *Config) (*Manager, error) {
 		grpc.Creds(config.SecurityConfig.ServerTLSCreds),
 		grpc.StreamInterceptor(streamInterceptorWrapper),
 		grpc.UnaryInterceptor(unaryInterceptorWrapper),
-		grpc.MaxMsgSize(transport.GRPCMaxMsgSize),
+		grpc.MaxRecvMsgSize(transport.GRPCMaxMsgSize),
 	}
 
 	m := &Manager{
@@ -930,7 +936,8 @@ func (m *Manager) becomeLeader(ctx context.Context) {
 			raftCfg,
 			api.EncryptionConfig{AutoLockManagers: m.config.AutoLockManagers},
 			unlockKeys,
-			rootCA))
+			rootCA,
+			m.config.FIPS))
 
 		if err != nil && err != store.ErrExist {
 			log.G(ctx).WithError(err).Errorf("error creating cluster object")
@@ -950,15 +957,13 @@ func (m *Manager) becomeLeader(ctx context.Context) {
 			}
 		}
 		// Create now the static predefined if the store does not contain predefined
-		//networks like bridge/host node-local networks which
+		// networks like bridge/host node-local networks which
 		// are known to be present in each cluster node. This is needed
 		// in order to allow running services on the predefined docker
 		// networks like `bridge` and `host`.
 		for _, p := range allocator.PredefinedNetworks() {
-			if store.GetNetwork(tx, p.Name) == nil {
-				if err := store.CreateNetwork(tx, newPredefinedNetwork(p.Name, p.Driver)); err != nil {
-					log.G(ctx).WithError(err).Error("failed to create predefined network " + p.Name)
-				}
+			if err := store.CreateNetwork(tx, newPredefinedNetwork(p.Name, p.Driver)); err != store.ErrNameConflict {
+				log.G(ctx).WithError(err).Error("failed to create predefined network " + p.Name)
 			}
 		}
 		return nil
@@ -1097,7 +1102,8 @@ func defaultClusterObject(
 	raftCfg api.RaftConfig,
 	encryptionConfig api.EncryptionConfig,
 	initialUnlockKeys []*api.EncryptionKey,
-	rootCA *ca.RootCA) *api.Cluster {
+	rootCA *ca.RootCA,
+	fips bool) *api.Cluster {
 	var caKey []byte
 	if rcaSigner, err := rootCA.Signer(); err == nil {
 		caKey = rcaSigner.Key
@@ -1124,11 +1130,12 @@ func defaultClusterObject(
 			CACert:     rootCA.Certs,
 			CACertHash: rootCA.Digest.String(),
 			JoinTokens: api.JoinTokens{
-				Worker:  ca.GenerateJoinToken(rootCA),
-				Manager: ca.GenerateJoinToken(rootCA),
+				Worker:  ca.GenerateJoinToken(rootCA, fips),
+				Manager: ca.GenerateJoinToken(rootCA, fips),
 			},
 		},
 		UnlockKeys: initialUnlockKeys,
+		FIPS:       fips,
 	}
 }
 

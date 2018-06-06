@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -14,7 +15,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"golang.org/x/net/context"
 )
 
 type pluginOptions struct {
@@ -124,9 +124,8 @@ func buildPullConfig(ctx context.Context, dockerCli command.Cli, opts pluginOpti
 		Disabled:              opts.disable,
 		AcceptAllPermissions:  opts.grantPerms,
 		AcceptPermissionsFunc: acceptPrivileges(dockerCli, opts.remote),
-		// TODO: Rename PrivilegeFunc, it has nothing to do with privileges
-		PrivilegeFunc: registryAuthFunc,
-		Args:          opts.args,
+		PrivilegeFunc:         registryAuthFunc,
+		Args:                  opts.args,
 	}
 	return options, nil
 }

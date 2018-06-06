@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"io/ioutil"
 	"strings"
 	"testing"
@@ -11,7 +12,6 @@ import (
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 func TestNetworkCreateErrors(t *testing.T) {
@@ -146,10 +146,10 @@ func TestNetworkCreateWithFlags(t *testing.T) {
 	expectedDriver := "foo"
 	expectedOpts := []network.IPAMConfig{
 		{
-			"192.168.4.0/24",
-			"192.168.4.0/24",
-			"192.168.4.1/24",
-			map[string]string{},
+			Subnet:     "192.168.4.0/24",
+			IPRange:    "192.168.4.0/24",
+			Gateway:    "192.168.4.1/24",
+			AuxAddress: map[string]string{},
 		},
 	}
 	cli := test.NewFakeCli(&fakeClient{

@@ -1,5 +1,21 @@
 // +build !windows
 
+/*
+   Copyright The containerd Authors.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package cio
 
 import (
@@ -47,7 +63,10 @@ func copyIO(fifos *FIFOSet, ioset *Streams) (*cio, error) {
 
 	if fifos.Stdin != "" {
 		go func() {
-			io.Copy(pipes.Stdin, ioset.Stdin)
+			p := bufPool.Get().(*[]byte)
+			defer bufPool.Put(p)
+
+			io.CopyBuffer(pipes.Stdin, ioset.Stdin, *p)
 			pipes.Stdin.Close()
 		}()
 	}
@@ -55,7 +74,10 @@ func copyIO(fifos *FIFOSet, ioset *Streams) (*cio, error) {
 	var wg = &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		io.Copy(ioset.Stdout, pipes.Stdout)
+		p := bufPool.Get().(*[]byte)
+		defer bufPool.Put(p)
+
+		io.CopyBuffer(ioset.Stdout, pipes.Stdout, *p)
 		pipes.Stdout.Close()
 		wg.Done()
 	}()
@@ -63,7 +85,10 @@ func copyIO(fifos *FIFOSet, ioset *Streams) (*cio, error) {
 	if !fifos.Terminal {
 		wg.Add(1)
 		go func() {
-			io.Copy(ioset.Stderr, pipes.Stderr)
+			p := bufPool.Get().(*[]byte)
+			defer bufPool.Put(p)
+
+			io.CopyBuffer(ioset.Stderr, pipes.Stderr, *p)
 			pipes.Stderr.Close()
 			wg.Done()
 		}()
@@ -89,17 +114,24 @@ func openFifos(ctx context.Context, fifos *FIFOSet) (pipes, error) {
 		if f.Stdin, err = fifo.OpenFifo(ctx, fifos.Stdin, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_NONBLOCK, 0700); err != nil {
 			return f, errors.Wrapf(err, "failed to open stdin fifo")
 		}
+		defer func() {
+			if err != nil && f.Stdin != nil {
+				f.Stdin.Close()
+			}
+		}()
 	}
 	if fifos.Stdout != "" {
 		if f.Stdout, err = fifo.OpenFifo(ctx, fifos.Stdout, syscall.O_RDONLY|syscall.O_CREAT|syscall.O_NONBLOCK, 0700); err != nil {
-			f.Stdin.Close()
 			return f, errors.Wrapf(err, "failed to open stdout fifo")
 		}
+		defer func() {
+			if err != nil && f.Stdout != nil {
+				f.Stdout.Close()
+			}
+		}()
 	}
 	if fifos.Stderr != "" {
 		if f.Stderr, err = fifo.OpenFifo(ctx, fifos.Stderr, syscall.O_RDONLY|syscall.O_CREAT|syscall.O_NONBLOCK, 0700); err != nil {
-			f.Stdin.Close()
-			f.Stdout.Close()
 			return f, errors.Wrapf(err, "failed to open stderr fifo")
 		}
 	}
@@ -109,8 +141,18 @@ func openFifos(ctx context.Context, fifos *FIFOSet) (pipes, error) {
 // NewDirectIO returns an IO implementation that exposes the IO streams as io.ReadCloser
 // and io.WriteCloser.
 func NewDirectIO(ctx context.Context, fifos *FIFOSet) (*DirectIO, error) {
+	return newDirectIO(ctx, fifos, false)
+}
+
+// NewDirectIOWithTerminal returns an IO implementation that exposes the streams with terminal enabled
+func NewDirectIOWithTerminal(ctx context.Context, fifos *FIFOSet) (*DirectIO, error) {
+	return newDirectIO(ctx, fifos, true)
+}
+
+func newDirectIO(ctx context.Context, fifos *FIFOSet, terminal bool) (*DirectIO, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	pipes, err := openFifos(ctx, fifos)
+	fifos.Config.Terminal = terminal
 	return &DirectIO{
 		pipes: pipes,
 		cio: cio{

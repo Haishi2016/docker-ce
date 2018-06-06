@@ -1,15 +1,16 @@
 package swarm
 
 import (
+	"context"
 	"testing"
 
+	"github.com/docker/cli/cli/command/stack/options"
 	"github.com/docker/cli/cli/compose/convert"
 	"github.com/docker/cli/internal/test"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/gotestyourself/gotestyourself/assert"
 	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"golang.org/x/net/context"
 )
 
 func TestPruneServices(t *testing.T) {
@@ -26,8 +27,18 @@ func TestPruneServices(t *testing.T) {
 	assert.Check(t, is.DeepEqual(buildObjectIDs([]string{objectName("foo", "remove")}), client.removedServices))
 }
 
+func TestDeployWithEmptyName(t *testing.T) {
+	ctx := context.Background()
+	client := &fakeClient{}
+	dockerCli := test.NewFakeCli(client)
+
+	err := deployCompose(ctx, dockerCli, options.Deploy{Namespace: "'   '", Prune: true})
+	assert.Check(t, is.Error(err, `invalid stack name: "'   '"`))
+}
+
 // TestServiceUpdateResolveImageChanged tests that the service's
-// image digest is preserved if the image did not change in the compose file
+// image digest, and "ForceUpdate" is preserved if the image did not change in
+// the compose file
 func TestServiceUpdateResolveImageChanged(t *testing.T) {
 	namespace := convert.NewNamespace("mystack")
 
@@ -49,6 +60,7 @@ func TestServiceUpdateResolveImageChanged(t *testing.T) {
 							ContainerSpec: &swarm.ContainerSpec{
 								Image: "foobar:1.2.3@sha256:deadbeef",
 							},
+							ForceUpdate: 123,
 						},
 					},
 				},
@@ -65,18 +77,21 @@ func TestServiceUpdateResolveImageChanged(t *testing.T) {
 		image                 string
 		expectedQueryRegistry bool
 		expectedImage         string
+		expectedForceUpdate   uint64
 	}{
 		// Image not changed
 		{
 			image: "foobar:1.2.3",
 			expectedQueryRegistry: false,
 			expectedImage:         "foobar:1.2.3@sha256:deadbeef",
+			expectedForceUpdate:   123,
 		},
 		// Image changed
 		{
 			image: "foobar:1.2.4",
 			expectedQueryRegistry: true,
 			expectedImage:         "foobar:1.2.4",
+			expectedForceUpdate:   123,
 		},
 	}
 
@@ -95,8 +110,9 @@ func TestServiceUpdateResolveImageChanged(t *testing.T) {
 		}
 		err := deployServices(ctx, client, spec, namespace, false, ResolveImageChanged)
 		assert.NilError(t, err)
-		assert.Check(t, is.Equal(testcase.expectedQueryRegistry, receivedOptions.QueryRegistry))
-		assert.Check(t, is.Equal(testcase.expectedImage, receivedService.TaskTemplate.ContainerSpec.Image))
+		assert.Check(t, is.Equal(receivedOptions.QueryRegistry, testcase.expectedQueryRegistry))
+		assert.Check(t, is.Equal(receivedService.TaskTemplate.ContainerSpec.Image, testcase.expectedImage))
+		assert.Check(t, is.Equal(receivedService.TaskTemplate.ForceUpdate, testcase.expectedForceUpdate))
 
 		receivedService = swarm.ServiceSpec{}
 		receivedOptions = types.ServiceUpdateOptions{}

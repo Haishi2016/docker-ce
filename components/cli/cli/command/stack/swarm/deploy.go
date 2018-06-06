@@ -1,6 +1,7 @@
 package swarm
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/docker/cli/cli/command"
@@ -9,7 +10,6 @@ import (
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/api/types/versions"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 )
 
 // Resolve image constants
@@ -24,6 +24,9 @@ const (
 func RunDeploy(dockerCli command.Cli, opts options.Deploy) error {
 	ctx := context.Background()
 
+	if err := validateStackName(opts.Namespace); err != nil {
+		return err
+	}
 	if err := validateResolveImageFlag(dockerCli, &opts); err != nil {
 		return err
 	}
@@ -73,9 +76,9 @@ func checkDaemonIsSwarmManager(ctx context.Context, dockerCli command.Cli) error
 func pruneServices(ctx context.Context, dockerCli command.Cli, namespace convert.Namespace, services map[string]struct{}) {
 	client := dockerCli.Client()
 
-	oldServices, err := getServices(ctx, client, namespace.Name())
+	oldServices, err := getStackServices(ctx, client, namespace.Name())
 	if err != nil {
-		fmt.Fprintf(dockerCli.Err(), "Failed to list services: %s", err)
+		fmt.Fprintf(dockerCli.Err(), "Failed to list services: %s\n", err)
 	}
 
 	pruneServices := []swarm.Service{}

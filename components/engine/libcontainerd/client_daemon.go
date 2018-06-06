@@ -16,25 +16,24 @@ import (
 	"syscall"
 	"time"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/api/events"
-	eventsapi "github.com/containerd/containerd/api/services/events/v1"
+	apievents "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/archive"
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/content"
 	containerderrors "github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/linux/runctypes"
 	"github.com/containerd/typeurl"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/opencontainers/image-spec/specs-go/v1"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -114,6 +113,13 @@ type client struct {
 	containers map[string]*container
 }
 
+func (c *client) reconnect() error {
+	c.Lock()
+	err := c.remote.Reconnect()
+	c.Unlock()
+	return err
+}
+
 func (c *client) setRemote(remote *containerd.Client) {
 	c.Lock()
 	c.remote = remote
@@ -131,9 +137,30 @@ func (c *client) Version(ctx context.Context) (containerd.Version, error) {
 	return c.getRemote().Version(ctx)
 }
 
+// Restore loads the containerd container.
+// It should not be called concurrently with any other operation for the given ID.
 func (c *client) Restore(ctx context.Context, id string, attachStdio StdioCallback) (alive bool, pid int, err error) {
 	c.Lock()
-	defer c.Unlock()
+	_, ok := c.containers[id]
+	if ok {
+		c.Unlock()
+		return false, 0, errors.WithStack(newConflictError("id already in use"))
+	}
+
+	cntr := &container{}
+	c.containers[id] = cntr
+	cntr.mu.Lock()
+	defer cntr.mu.Unlock()
+
+	c.Unlock()
+
+	defer func() {
+		if err != nil {
+			c.Lock()
+			delete(c.containers, id)
+			c.Unlock()
+		}
+	}()
 
 	var dio *cio.DirectIO
 	defer func() {
@@ -144,9 +171,9 @@ func (c *client) Restore(ctx context.Context, id string, attachStdio StdioCallba
 		err = wrapError(err)
 	}()
 
-	ctr, err := c.remote.LoadContainer(ctx, id)
+	ctr, err := c.getRemote().LoadContainer(ctx, id)
 	if err != nil {
-		return false, -1, errors.WithStack(err)
+		return false, -1, errors.WithStack(wrapError(err))
 	}
 
 	attachIO := func(fifos *cio.FIFOSet) (cio.IO, error) {
@@ -160,24 +187,23 @@ func (c *client) Restore(ctx context.Context, id string, attachStdio StdioCallba
 	}
 	t, err := ctr.Task(ctx, attachIO)
 	if err != nil && !containerderrors.IsNotFound(err) {
-		return false, -1, err
+		return false, -1, errors.Wrap(wrapError(err), "error getting containerd task for container")
 	}
 
 	if t != nil {
 		s, err := t.Status(ctx)
 		if err != nil {
-			return false, -1, err
+			return false, -1, errors.Wrap(wrapError(err), "error getting task status")
 		}
 
 		alive = s.Status != containerd.Stopped
 		pid = int(t.Pid())
 	}
-	c.containers[id] = &container{
-		bundleDir: filepath.Join(c.stateDir, id),
-		ctr:       ctr,
-		task:      t,
-		// TODO(mlaventure): load execs
-	}
+
+	cntr.bundleDir = filepath.Join(c.stateDir, id)
+	cntr.ctr = ctr
+	cntr.task = t
+	// TODO(mlaventure): load execs
 
 	c.logger.WithFields(logrus.Fields{
 		"container": id,
@@ -268,7 +294,8 @@ func (c *client) Start(ctx context.Context, id, checkpointDir string, withStdin 
 	t, err = ctr.ctr.NewTask(ctx,
 		func(id string) (cio.IO, error) {
 			fifos := newFIFOSet(ctr.bundleDir, InitProcessName, withStdin, spec.Process.Terminal)
-			rio, err = c.createIO(fifos, id, InitProcessName, stdinCloseSync, attachStdio)
+
+			rio, err = c.createIO(fifos, id, InitProcessName, stdinCloseSync, attachStdio, spec.Process.Terminal)
 			return rio, err
 		},
 		func(_ context.Context, _ *containerd.Client, info *containerd.TaskInfo) error {
@@ -339,7 +366,7 @@ func (c *client) Exec(ctx context.Context, containerID, processID string, spec *
 	}()
 
 	p, err = t.Exec(ctx, processID, spec, func(id string) (cio.IO, error) {
-		rio, err = c.createIO(fifos, containerID, processID, stdinCloseSync, attachStdio)
+		rio, err = c.createIO(fifos, containerID, processID, stdinCloseSync, attachStdio, spec.Terminal)
 		return rio, err
 	})
 	if err != nil {
@@ -618,8 +645,16 @@ func (c *client) getProcess(containerID, processID string) (containerd.Process, 
 
 // createIO creates the io to be used by a process
 // This needs to get a pointer to interface as upon closure the process may not have yet been registered
-func (c *client) createIO(fifos *cio.FIFOSet, containerID, processID string, stdinCloseSync chan struct{}, attachStdio StdioCallback) (cio.IO, error) {
-	io, err := cio.NewDirectIO(context.Background(), fifos)
+func (c *client) createIO(fifos *cio.FIFOSet, containerID, processID string, stdinCloseSync chan struct{}, attachStdio StdioCallback, terminal bool) (cio.IO, error) {
+	var (
+		io  *cio.DirectIO
+		err error
+	)
+	if terminal {
+		io, err = cio.NewDirectIOWithTerminal(context.Background(), fifos)
+	} else {
+		io, err = cio.NewDirectIO(context.Background(), fifos)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -702,137 +737,123 @@ func (c *client) processEvent(ctr *container, et EventType, ei EventInfo) {
 
 func (c *client) processEventStream(ctx context.Context) {
 	var (
-		err         error
-		eventStream eventsapi.Events_SubscribeClient
-		ev          *eventsapi.Envelope
-		et          EventType
-		ei          EventInfo
-		ctr         *container
+		err error
+		ev  *events.Envelope
+		et  EventType
+		ei  EventInfo
+		ctr *container
 	)
-	defer func() {
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				c.logger.WithError(ctx.Err()).
-					Info("stopping event stream following graceful shutdown")
-			default:
-				go c.processEventStream(ctx)
-			}
-		}
-	}()
 
-	eventStream, err = c.getRemote().EventService().Subscribe(ctx, &eventsapi.SubscribeRequest{
-		Filters: []string{
-			// Filter on both namespace *and* topic. To create an "and" filter,
-			// this must be a single, comma-separated string
-			"namespace==" + c.namespace + ",topic~=|^/tasks/|",
-		},
-	}, grpc.FailFast(false))
-	if err != nil {
-		return
-	}
+	// Filter on both namespace *and* topic. To create an "and" filter,
+	// this must be a single, comma-separated string
+	eventStream, errC := c.getRemote().EventService().Subscribe(ctx, "namespace=="+c.namespace+",topic~=|^/tasks/|")
 
 	c.logger.WithField("namespace", c.namespace).Debug("processing event stream")
 
 	var oomKilled bool
 	for {
-		ev, err = eventStream.Recv()
-		if err != nil {
-			errStatus, ok := status.FromError(err)
-			if !ok || errStatus.Code() != codes.Canceled {
-				c.logger.WithError(err).Error("failed to get event")
+		select {
+		case err = <-errC:
+			if err != nil {
+				errStatus, ok := status.FromError(err)
+				if !ok || errStatus.Code() != codes.Canceled {
+					c.logger.WithError(err).Error("failed to get event")
+					go c.processEventStream(ctx)
+				} else {
+					c.logger.WithError(ctx.Err()).Info("stopping event stream following graceful shutdown")
+				}
 			}
 			return
+		case ev = <-eventStream:
+			if ev.Event == nil {
+				c.logger.WithField("event", ev).Warn("invalid event")
+				continue
+			}
+
+			v, err := typeurl.UnmarshalAny(ev.Event)
+			if err != nil {
+				c.logger.WithError(err).WithField("event", ev).Warn("failed to unmarshal event")
+				continue
+			}
+
+			c.logger.WithField("topic", ev.Topic).Debug("event")
+
+			switch t := v.(type) {
+			case *apievents.TaskCreate:
+				et = EventCreate
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					ProcessID:   t.ContainerID,
+					Pid:         t.Pid,
+				}
+			case *apievents.TaskStart:
+				et = EventStart
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					ProcessID:   t.ContainerID,
+					Pid:         t.Pid,
+				}
+			case *apievents.TaskExit:
+				et = EventExit
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					ProcessID:   t.ID,
+					Pid:         t.Pid,
+					ExitCode:    t.ExitStatus,
+					ExitedAt:    t.ExitedAt,
+				}
+			case *apievents.TaskOOM:
+				et = EventOOM
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					OOMKilled:   true,
+				}
+				oomKilled = true
+			case *apievents.TaskExecAdded:
+				et = EventExecAdded
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					ProcessID:   t.ExecID,
+				}
+			case *apievents.TaskExecStarted:
+				et = EventExecStarted
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+					ProcessID:   t.ExecID,
+					Pid:         t.Pid,
+				}
+			case *apievents.TaskPaused:
+				et = EventPaused
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+				}
+			case *apievents.TaskResumed:
+				et = EventResumed
+				ei = EventInfo{
+					ContainerID: t.ContainerID,
+				}
+			default:
+				c.logger.WithFields(logrus.Fields{
+					"topic": ev.Topic,
+					"type":  reflect.TypeOf(t)},
+				).Info("ignoring event")
+				continue
+			}
+
+			ctr = c.getContainer(ei.ContainerID)
+			if ctr == nil {
+				c.logger.WithField("container", ei.ContainerID).Warn("unknown container")
+				continue
+			}
+
+			if oomKilled {
+				ctr.setOOMKilled(true)
+				oomKilled = false
+			}
+			ei.OOMKilled = ctr.getOOMKilled()
+
+			c.processEvent(ctr, et, ei)
 		}
-
-		if ev.Event == nil {
-			c.logger.WithField("event", ev).Warn("invalid event")
-			continue
-		}
-
-		v, err := typeurl.UnmarshalAny(ev.Event)
-		if err != nil {
-			c.logger.WithError(err).WithField("event", ev).Warn("failed to unmarshal event")
-			continue
-		}
-
-		c.logger.WithField("topic", ev.Topic).Debug("event")
-
-		switch t := v.(type) {
-		case *events.TaskCreate:
-			et = EventCreate
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				ProcessID:   t.ContainerID,
-				Pid:         t.Pid,
-			}
-		case *events.TaskStart:
-			et = EventStart
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				ProcessID:   t.ContainerID,
-				Pid:         t.Pid,
-			}
-		case *events.TaskExit:
-			et = EventExit
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				ProcessID:   t.ID,
-				Pid:         t.Pid,
-				ExitCode:    t.ExitStatus,
-				ExitedAt:    t.ExitedAt,
-			}
-		case *events.TaskOOM:
-			et = EventOOM
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				OOMKilled:   true,
-			}
-			oomKilled = true
-		case *events.TaskExecAdded:
-			et = EventExecAdded
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				ProcessID:   t.ExecID,
-			}
-		case *events.TaskExecStarted:
-			et = EventExecStarted
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-				ProcessID:   t.ExecID,
-				Pid:         t.Pid,
-			}
-		case *events.TaskPaused:
-			et = EventPaused
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-			}
-		case *events.TaskResumed:
-			et = EventResumed
-			ei = EventInfo{
-				ContainerID: t.ContainerID,
-			}
-		default:
-			c.logger.WithFields(logrus.Fields{
-				"topic": ev.Topic,
-				"type":  reflect.TypeOf(t)},
-			).Info("ignoring event")
-			continue
-		}
-
-		ctr = c.getContainer(ei.ContainerID)
-		if ctr == nil {
-			c.logger.WithField("container", ei.ContainerID).Warn("unknown container")
-			continue
-		}
-
-		if oomKilled {
-			ctr.setOOMKilled(true)
-			oomKilled = false
-		}
-		ei.OOMKilled = ctr.getOOMKilled()
-
-		c.processEvent(ctr, et, ei)
 	}
 }
 

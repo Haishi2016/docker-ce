@@ -1,14 +1,13 @@
 package kubernetes
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
+	"net"
+	"net/url"
 
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/kubernetes"
-	composev1beta1 "github.com/docker/cli/kubernetes/client/clientset_generated/clientset/typed/compose/v1beta1"
-	"github.com/docker/docker/pkg/homedir"
-	"github.com/pkg/errors"
+	cliv1beta1 "github.com/docker/cli/kubernetes/client/clientset/typed/compose/v1beta1"
 	flag "github.com/spf13/pflag"
 	kubeclient "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -40,25 +39,29 @@ func NewOptions(flags *flag.FlagSet) Options {
 	return opts
 }
 
+// AddNamespaceFlag adds the namespace flag to the given flag set
+func AddNamespaceFlag(flags *flag.FlagSet) {
+	flags.String("namespace", "", "Kubernetes namespace to use")
+	flags.SetAnnotation("namespace", "kubernetes", nil)
+}
+
 // WrapCli wraps command.Cli with kubernetes specifics
 func WrapCli(dockerCli command.Cli, opts Options) (*KubeCli, error) {
-	var err error
 	cli := &KubeCli{
-		Cli:           dockerCli,
-		kubeNamespace: "default",
+		Cli: dockerCli,
 	}
-	if opts.Namespace != "" {
-		cli.kubeNamespace = opts.Namespace
-	}
-	kubeConfig := opts.Config
-	if kubeConfig == "" {
-		if config := os.Getenv("KUBECONFIG"); config != "" {
-			kubeConfig = config
-		} else {
-			kubeConfig = filepath.Join(homedir.Get(), ".kube/config")
+	clientConfig := kubernetes.NewKubernetesConfig(opts.Config)
+
+	cli.kubeNamespace = opts.Namespace
+	if opts.Namespace == "" {
+		configNamespace, _, err := clientConfig.Namespace()
+		if err != nil {
+			return nil, err
 		}
+		cli.kubeNamespace = configNamespace
 	}
-	config, err := kubernetes.NewKubernetesConfig(kubeConfig)
+
+	config, err := clientConfig.ClientConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -70,28 +73,51 @@ func WrapCli(dockerCli command.Cli, opts Options) (*KubeCli, error) {
 	}
 	cli.clientSet = clientSet
 
+	if dockerCli.ClientInfo().HasAll() {
+		if err := cli.checkHostsMatch(); err != nil {
+			return nil, err
+		}
+	}
 	return cli, nil
 }
 
 func (c *KubeCli) composeClient() (*Factory, error) {
-	return NewFactory(c.kubeNamespace, c.kubeConfig)
+	return NewFactory(c.kubeNamespace, c.kubeConfig, c.clientSet)
 }
 
-func (c *KubeCli) stacks() (composev1beta1.StackInterface, error) {
-	version, err := kubernetes.GetStackAPIVersion(c.clientSet)
+func (c *KubeCli) checkHostsMatch() error {
+	daemonEndpoint, err := url.Parse(c.Client().DaemonHost())
+	if err != nil {
+		return err
+	}
+	kubeEndpoint, err := url.Parse(c.kubeConfig.Host)
+	if err != nil {
+		return err
+	}
+	if daemonEndpoint.Hostname() == kubeEndpoint.Hostname() {
+		return nil
+	}
+	// The daemon can be local in Docker for Desktop, e.g. "npipe", "unix", ...
+	if daemonEndpoint.Scheme != "tcp" {
+		ips, err := net.LookupIP(kubeEndpoint.Hostname())
+		if err != nil {
+			return err
+		}
+		for _, ip := range ips {
+			if ip.IsLoopback() {
+				return nil
+			}
+		}
+	}
+	fmt.Fprintf(c.Err(), "WARNING: Swarm and Kubernetes hosts do not match (docker host=%s, kubernetes host=%s).\n"+
+		"         Update $DOCKER_HOST (or pass -H), or use 'kubectl config use-context' to match.\n", daemonEndpoint.Hostname(), kubeEndpoint.Hostname())
+	return nil
+}
 
+func (c *KubeCli) stacksv1beta1() (cliv1beta1.StackInterface, error) {
+	raw, err := newStackV1Beta1(c.kubeConfig, c.kubeNamespace)
 	if err != nil {
 		return nil, err
 	}
-
-	switch version {
-	case kubernetes.StackAPIV1Beta1:
-		clientSet, err := composev1beta1.NewForConfig(c.kubeConfig)
-		if err != nil {
-			return nil, err
-		}
-		return clientSet.Stacks(c.kubeNamespace), nil
-	default:
-		return nil, errors.Errorf("no supported Stack API version")
-	}
+	return raw.stacks, nil
 }

@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/registry"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/context"
 )
 
 type inspectOptions struct {
@@ -43,7 +43,7 @@ func newInspectCommand(dockerCli command.Cli) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.BoolVar(&opts.insecure, "insecure", false, "allow communication with an insecure registry")
+	flags.BoolVar(&opts.insecure, "insecure", false, "Allow communication with an insecure registry")
 	flags.BoolVarP(&opts.verbose, "verbose", "v", false, "Output additional info including layers and platform")
 	return cmd
 }
