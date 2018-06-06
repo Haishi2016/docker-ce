@@ -203,10 +203,6 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 
 	//if image not found try to pull it
 	if err != nil {
-	
-		logrus.Debugf("ERROR !!! %v", err)
-		logrus.Debugf("RESPONSE !!! %v", response)
-
 		if apiclient.IsErrNotFound(err) && namedRef != nil {
 			fmt.Fprintf(stderr, "Unable to find image '%s' locally\n", reference.FamiliarString(namedRef))
 
