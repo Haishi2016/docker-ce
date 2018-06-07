@@ -4437,10 +4437,6 @@ paths:
                         type: "object"
                         additionalProperties:
                           $ref: "#/definitions/EndpointSettings"
-                  Patches:
-                    type: array
-                    items:
-                      type: string
             example:
               Hostname: ""
               Domainname: ""

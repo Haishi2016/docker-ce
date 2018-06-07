@@ -68,25 +68,20 @@ func NewImageStore(fs StoreBackend, lss map[string]LayerGetReleaser) (Store, err
 	return is, nil
 }
 func (is *store) GetPatches(id ID) ([]string, error) {
-	logrus.Debugf("---------------------before retrieving image: %v", id)
 	oImg,err := is.Get(id)
 	if err != nil {
 		return nil, err
 	}
 	var patches []string
 	topIDMap := make(map[layer.DiffID]string)
-	logrus.Debug("---------------------before repository walk")
 	err = is.fs.Walk(func(dgst digest.Digest) error {
-		logrus.Debug("-------------------------------walking")
 		img, err := is.Get(IDFromDigest(dgst))
 		if err != nil {
-			logrus.Errorf("Invalid image %v, %v", dgst, err)
 			return err 
 		}
 		topId := img.RootFS.DiffIDs[len(img.RootFS.DiffIDs)-1]
 		label, ok := img.Config.Labels["patches"]
 		if ok {
-			logrus.Debug("PATCH FOUND!!!!!!!!!!!!!!!!!!!!!!")
 			topIDMap[topId] = label
 		}
 		return nil
@@ -100,7 +95,6 @@ func (is *store) GetPatches(id ID) ([]string, error) {
 			patches = append(patches, strings.Split(p,",")...)
 		}
 	}
-	logrus.Debugf("FOUND PATCHES: %v", patches)
 	return patches, nil
 }
 func (is *store) restore() error {

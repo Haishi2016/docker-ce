@@ -538,9 +538,6 @@ func (d *Driver) Get(id, mountLabel string) (_ containerfs.ContainerFS, retErr e
 		return nil, err
 	}
 
-	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$$$$$ requested id: %v", id)
-	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$$$$$ resolved dir: %v", dir)
-
 	diffDir := path.Join(dir, "diff")
 	lowers, err := ioutil.ReadFile(path.Join(dir, lowerFile))
 	if err != nil {
@@ -575,9 +572,6 @@ func (d *Driver) Get(id, mountLabel string) (_ containerfs.ContainerFS, retErr e
 	for i, s := range splitLowers {
 		absLowers[i] = path.Join(d.home, s)
 	}
-
-	logrus.Debugf("$$$$$$$$$$$$$$$$$$$$$$$ lowers: %v", lowers)
-
 	opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", strings.Join(absLowers, ":"), path.Join(dir, "diff"), path.Join(dir, "work"))
 	mountData := label.FormatMountLabel(opts, mountLabel)
 	mount := unix.Mount
