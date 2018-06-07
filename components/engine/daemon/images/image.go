@@ -55,7 +55,6 @@ func (i *ImageService) GetImage(refOrID string) (*image.Image, error) {
 	if id, err := i.imageStore.Search(refOrID); err == nil {
 		img, err := i.imageStore.Get(id)
 		if err != nil {
-			logrus.Debugf("Failed to get image: %v", err)
 			return nil, ErrImageDoesNotExist{ref}
 		}
 		return img, nil
