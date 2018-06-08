@@ -46,6 +46,9 @@ func (cli *Client) ContainerCreate(ctx context.Context, config *container.Config
 	if err != nil {
 		if serverResp.statusCode == 404 && strings.Contains(err.Error(), "No such image") {
 			return response, objectNotFoundError{object: "image", id: config.Image}
+		} else if serverResp.statusCode == 404 && strings.Contains(err.Error(), "Missing patches") {
+			errTxt := err.Error()
+			return response, objectNotFoundError{object: "patches", id: strings.TrimSpace(errTxt[strings.Index(errTxt, ":")+1:])
 		}
 		return response, err
 	}

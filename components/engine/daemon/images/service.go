@@ -3,6 +3,7 @@ package images // import "github.com/docker/docker/daemon/images"
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/docker/docker/container"
 	daemonevents "github.com/docker/docker/daemon/events"
@@ -95,6 +96,18 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 	if len(patches) > 0 {
 		patchMap :=make(map[string][]layer.DiffID)
 		chainLookUpMap := make(map[string]layer.ChainID)
+		var missedPatches []string
+		for _,p := range patches {
+			if p != "" {
+				_, err := i.GetImage(p)
+				if err != nil {
+					missedPatches = append(missedPatches, p)
+				}
+			}
+		}
+		if len(missedPatches) > 0 {
+			return errors.Errorf("Missed Patches: %s", strings.Join(missedPatches,","))
+		}
 		for _, p := range patches {
 			if p != "" {
 				pImg, err := i.GetImage(p)

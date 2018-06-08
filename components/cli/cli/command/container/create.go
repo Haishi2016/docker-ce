@@ -205,10 +205,16 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 	if err != nil {
 		if apiclient.IsErrNotFound(err) && namedRef != nil {
 			fmt.Fprintf(stderr, "Unable to find image '%s' locally\n", reference.FamiliarString(namedRef))
-
-			// we don't want to write to stdout anything apart from container.ID
-			if err := pullImage(ctx, dockerCli, config.Image, opts.platform, stderr); err != nil {
-				return nil, err
+			imageList := err.Error()
+			imageList = strings.TrimSpace(imageList[strings.LastIndex(imageList, ":")+1:])
+			
+			for _, p := range strings.Split(imageList, ",") {
+				if p != "" {
+					// we don't want to write to stdout anything apart from container.ID
+					if err := pullImage(ctx, dockerCli, p, opts.platform, stderr); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if taggedRef, ok := namedRef.(reference.NamedTagged); ok && trustedRef != nil {
 				if err := image.TagTrusted(ctx, dockerCli, trustedRef, taggedRef); err != nil {
