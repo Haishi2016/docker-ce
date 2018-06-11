@@ -106,7 +106,7 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 			}
 		}
 		if len(missedPatches) > 0 {
-			return errors.Errorf("Missed Patches: %s", strings.Join(missedPatches,","))
+			return errors.Errorf("Missing patches: %s", strings.Join(missedPatches,","))
 		}
 		for _, p := range patches {
 			if p != "" {

@@ -73,7 +73,12 @@ func (daemon *Daemon) containerCreate(params types.ContainerCreateConfig, manage
 
 	container, err := daemon.create(params, managed)
 	if err != nil {
-		return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, err
+		logrus.Debugf("THIS IS THE ERROR: %v", err.Error())
+		if strings.Contains(err.Error(), "Missing patches") {
+			return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, errdefs.NotFound(err)
+		} else {
+			return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, err
+		}
 	}
 	containerActions.WithValues("create").UpdateSince(start)
 
