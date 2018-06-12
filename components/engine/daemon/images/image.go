@@ -26,7 +26,6 @@ func (e ErrImageDoesNotExist) NotFound() {}
 
 // GetImage returns an image corresponding to the image referred to by refOrID.
 func (i *ImageService) GetImage(refOrID string) (*image.Image, error) {
-
 	ref, err := reference.ParseAnyReference(refOrID)
 	if err != nil {
 		return nil, errdefs.InvalidParameter(err)
@@ -51,6 +50,7 @@ func (i *ImageService) GetImage(refOrID string) (*image.Image, error) {
 			return img, nil
 		}
 	}
+
 	// Search based on ID
 	if id, err := i.imageStore.Search(refOrID); err == nil {
 		img, err := i.imageStore.Get(id)
@@ -59,5 +59,6 @@ func (i *ImageService) GetImage(refOrID string) (*image.Image, error) {
 		}
 		return img, nil
 	}
+
 	return nil, ErrImageDoesNotExist{ref}
 }

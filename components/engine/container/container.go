@@ -54,7 +54,6 @@ type ExitStatus struct {
 	ExitedAt time.Time
 }
 
-
 // Container holds the structure defining a container object.
 type Container struct {
 	StreamConfig *stream.Config

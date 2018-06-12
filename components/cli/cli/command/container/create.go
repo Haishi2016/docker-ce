@@ -162,9 +162,7 @@ func newCIDFile(path string) (*cidFile, error) {
 
 func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig *containerConfig, opts *createOptions) (*container.ContainerCreateCreatedBody, error) {
 	config := containerConfig.Config
-
 	hostConfig := containerConfig.HostConfig
-
 	networkingConfig := containerConfig.NetworkingConfig
 	stderr := dockerCli.Err()
 
@@ -205,6 +203,7 @@ func createContainer(ctx context.Context, dockerCli command.Cli, containerConfig
 	if err != nil {
 		if apiclient.IsErrNotFound(err) && namedRef != nil {
 			fmt.Fprintf(stderr, "Unable to find image '%s' locally\n", reference.FamiliarString(namedRef))
+
 			// we don't want to write to stdout anything apart from container.ID
 			if err := pullImage(ctx, dockerCli, config.Image, opts.platform, stderr); err != nil {
 				return nil, err

@@ -663,7 +663,7 @@ func parse(flags *pflag.FlagSet, copts *containerOptions) (*containerConfig, err
 		copy(epConfig.Aliases, copts.aliases.GetAll())
 		networkingConfig.EndpointsConfig[string(hostConfig.NetworkMode)] = epConfig
 	}
-	
+
 	return &containerConfig{
 		Config:           config,
 		HostConfig:       hostConfig,

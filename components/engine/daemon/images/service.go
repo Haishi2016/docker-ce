@@ -136,13 +136,13 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 					return errors.Errorf("Can't apply patch %s", p)
 				}
 				for i, p := range pImg.RootFS.DiffIDs[lastMissmatch:] {
-					chainLookUpMap[string(p)] = createChainID(pImg.RootFS.DiffIDs[:lastMissmatch+i+1])
+					chainLookUpMap[string(p)] = layer.CreateChainID(pImg.RootFS.DiffIDs[:lastMissmatch+i+1])
 				}
 			}
 		}
 		index := 0
 		for i, l := range image.RootFS.DiffIDs {
-			chainLookUpMap[string(l)] = createChainID(image.RootFS.DiffIDs[:i+1])
+			chainLookUpMap[string(l)] = layer.CreateChainID(image.RootFS.DiffIDs[:i+1])
 		}
 		for index < len(image.RootFS.DiffIDs) {
 			mItem, ok := patchMap[string(image.RootFS.DiffIDs[index])]
@@ -162,7 +162,7 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 		var newIds []layer.DiffID
 		for index < len(image.RootFS.DiffIDs) {
 			newIds = append(newIds, image.RootFS.DiffIDs[index])
-			updatedChainID := createChainID(newIds)
+			updatedChainID := layer.CreateChainID(newIds)
 			_, err := i.layerStores[containerOS].Get(updatedChainID)
 			if err != nil {
 				goodChainID, ok := chainLookUpMap[string(image.RootFS.DiffIDs[index])]
@@ -176,7 +176,7 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 						return err
 					}
 					defer ts.Close()
-					nl, err := i.layerStores[containerOS].Register(ts, createChainID(newIds[:len(newIds)-1]))
+					nl, err := i.layerStores[containerOS].Register(ts, layer.CreateChainID(newIds[:len(newIds)-1]))
 					if err != nil {
 						return err
 					} else {
@@ -199,7 +199,6 @@ func (i *ImageService) applyPatches(image *image.Image, patches []string, contai
 // TODO: accept an opt struct instead of container?
 func (i *ImageService) CreateLayer(container *container.Container, initFunc layer.MountInit) (layer.RWLayer, error) {
 	var layerID layer.ChainID
-
 	if container.ImageID != "" {
 		img, err := i.imageStore.Get(container.ImageID)
 		if err != nil {
@@ -226,19 +225,7 @@ func (i *ImageService) CreateLayer(container *container.Container, initFunc laye
 	// caller), and guaranteed non-nil
 	return i.layerStores[container.OS].CreateRWLayer(container.ID, layerID, rwLayerOpts)
 }
-func createChainID(dgsts []layer.DiffID) layer.ChainID {
-	return createChainIDFromParent("", dgsts...)
-}
-func createChainIDFromParent(parent layer.ChainID, dgsts ...layer.DiffID) layer.ChainID {
-	if len(dgsts) == 0 {
-		return parent
-	}
-	if parent == "" {
-		return createChainIDFromParent(layer.ChainID(dgsts[0]),dgsts[1:]...)
-	}
-	dgst := digest.FromBytes([]byte(string(parent) + " " + string(dgsts[0])))
-	return createChainIDFromParent(layer.ChainID(dgst), dgsts[1:]...)
-}
+
 // GetLayerByID returns a layer by ID and operating system
 // called from daemon.go Daemon.restore(), and Daemon.containerExport()
 func (i *ImageService) GetLayerByID(cid string, os string) (layer.RWLayer, error) {

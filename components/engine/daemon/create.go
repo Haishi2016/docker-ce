@@ -19,8 +19,6 @@ import (
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"github.com/docker/docker/layer"
-	"github.com/opencontainers/go-digest"
 )
 
 // CreateManagedContainer creates a container that is managed by a Service
@@ -73,12 +71,7 @@ func (daemon *Daemon) containerCreate(params types.ContainerCreateConfig, manage
 
 	container, err := daemon.create(params, managed)
 	if err != nil {
-		logrus.Debugf("THIS IS THE ERROR: %v", err.Error())
-		if strings.Contains(err.Error(), "Missing patches") {
-			return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, errdefs.NotFound(err)
-		} else {
-			return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, err
-		}
+		return containertypes.ContainerCreateCreatedBody{Warnings: warnings}, err
 	}
 	containerActions.WithValues("create").UpdateSince(start)
 
@@ -157,7 +150,7 @@ func (daemon *Daemon) create(params types.ContainerCreateConfig, managed bool) (
 	if err := daemon.mergeAndVerifyConfig(params.Config, img); err != nil {
 		return nil, errdefs.InvalidParameter(err)
 	}
-	
+
 	if err := daemon.mergeAndVerifyLogConfig(&params.HostConfig.LogConfig); err != nil {
 		return nil, errdefs.InvalidParameter(err)
 	}
@@ -241,19 +234,6 @@ func toHostConfigSelinuxLabels(labels []string) []string {
 		labels[i] = "label=" + l
 	}
 	return labels
-}
-func createChainID(dgsts []layer.DiffID) layer.ChainID {
-	return createChainIDFromParent("", dgsts...)
-}
-func createChainIDFromParent(parent layer.ChainID, dgsts ...layer.DiffID) layer.ChainID {
-	if len(dgsts) == 0 {
-		return parent
-	}
-	if parent == "" {
-		return createChainIDFromParent(layer.ChainID(dgsts[0]), dgsts[1:]...)
-	}
-	dgst := digest.FromBytes([]byte(string(parent) + " " + string(dgsts[0])))
-	return createChainIDFromParent(layer.ChainID(dgst), dgsts[1:]...)
 }
 
 func (daemon *Daemon) generateSecurityOpt(hostConfig *containertypes.HostConfig) ([]string, error) {
