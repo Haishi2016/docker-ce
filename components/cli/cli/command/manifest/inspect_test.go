@@ -13,11 +13,12 @@ import (
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/schema2"
 	"github.com/docker/distribution/reference"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/golden"
 	digest "github.com/opencontainers/go-digest"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/golden"
 )
 
 func newTempManifestStore(t *testing.T) (store.Store, func()) {
@@ -50,8 +51,22 @@ func fullImageManifest(t *testing.T, ref reference.Named) types.ImageManifest {
 		},
 	})
 	assert.NilError(t, err)
+
 	// TODO: include image data for verbose inspect
-	return types.NewImageManifest(ref, digest.Digest("sha256:7328f6f8b41890597575cbaadc884e7386ae0acc53b747401ebce5cf0d62abcd"), types.Image{OS: "linux", Architecture: "amd64"}, man)
+	mt, raw, err := man.Payload()
+	assert.NilError(t, err)
+
+	desc := ocispec.Descriptor{
+		Digest:    digest.FromBytes(raw),
+		Size:      int64(len(raw)),
+		MediaType: mt,
+		Platform: &ocispec.Platform{
+			Architecture: "amd64",
+			OS:           "linux",
+		},
+	}
+
+	return types.NewImageManifest(ref, desc, man)
 }
 
 func TestInspectCommandLocalManifestNotFound(t *testing.T) {

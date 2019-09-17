@@ -22,7 +22,7 @@ const (
 
 // UnmountIpcMount unmounts Ipc related mounts.
 // This is a NOOP on windows.
-func (container *Container) UnmountIpcMount(unmount func(pth string) error) error {
+func (container *Container) UnmountIpcMount() error {
 	return nil
 }
 
@@ -41,7 +41,7 @@ func (container *Container) CreateSecretSymlinks() error {
 		if err != nil {
 			return err
 		}
-		if err := system.MkdirAll(filepath.Dir(resolvedPath), 0, ""); err != nil {
+		if err := system.MkdirAll(filepath.Dir(resolvedPath), 0); err != nil {
 			return err
 		}
 		if err := os.Symlink(filepath.Join(containerInternalSecretMountPath, r.SecretID), resolvedPath); err != nil {
@@ -91,7 +91,7 @@ func (container *Container) CreateConfigSymlinks() error {
 		if err != nil {
 			return err
 		}
-		if err := system.MkdirAll(filepath.Dir(resolvedPath), 0, ""); err != nil {
+		if err := system.MkdirAll(filepath.Dir(resolvedPath), 0); err != nil {
 			return err
 		}
 		if err := os.Symlink(filepath.Join(containerInternalConfigsDirPath, configRef.ConfigID), resolvedPath); err != nil {
@@ -153,13 +153,12 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 		resources.CpusetMems != "" ||
 		len(resources.Devices) != 0 ||
 		len(resources.DeviceCgroupRules) != 0 ||
-		resources.DiskQuota != 0 ||
 		resources.KernelMemory != 0 ||
 		resources.MemoryReservation != 0 ||
 		resources.MemorySwap != 0 ||
 		resources.MemorySwappiness != nil ||
 		resources.OomKillDisable != nil ||
-		resources.PidsLimit != 0 ||
+		(resources.PidsLimit != nil && *resources.PidsLimit != 0) ||
 		len(resources.Ulimits) != 0 ||
 		resources.CPUCount != 0 ||
 		resources.CPUPercent != 0 ||
@@ -180,11 +179,6 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 // BuildHostnameFile writes the container's hostname file.
 func (container *Container) BuildHostnameFile() error {
 	return nil
-}
-
-// EnableServiceDiscoveryOnDefaultNetwork Enable service discovery on default network
-func (container *Container) EnableServiceDiscoveryOnDefaultNetwork() bool {
-	return true
 }
 
 // GetMountPoints gives a platform specific transformation to types.MountPoint. Callers must hold a Container lock.
@@ -208,6 +202,6 @@ func (container *Container) ConfigsDirPath() string {
 }
 
 // ConfigFilePath returns the path to the on-disk location of a config.
-func (container *Container) ConfigFilePath(configRef swarmtypes.ConfigReference) string {
-	return filepath.Join(container.ConfigsDirPath(), configRef.ConfigID)
+func (container *Container) ConfigFilePath(configRef swarmtypes.ConfigReference) (string, error) {
+	return filepath.Join(container.ConfigsDirPath(), configRef.ConfigID), nil
 }

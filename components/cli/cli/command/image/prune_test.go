@@ -8,10 +8,10 @@ import (
 	"github.com/docker/cli/internal/test"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/golden"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/golden"
 )
 
 func TestNewPruneCommandErrors(t *testing.T) {
@@ -68,6 +68,14 @@ func TestNewPruneCommandSuccess(t *testing.T) {
 					ImagesDeleted:  []types.ImageDeleteResponseItem{{Deleted: "image1"}},
 					SpaceReclaimed: 1,
 				}, nil
+			},
+		},
+		{
+			name: "label-filter",
+			args: []string{"--force", "--filter", "label=foobar"},
+			imagesPruneFunc: func(pruneFilter filters.Args) (types.ImagesPruneReport, error) {
+				assert.Check(t, is.Equal("foobar", pruneFilter.Get("label")[0]))
+				return types.ImagesPruneReport{}, nil
 			},
 		},
 		{

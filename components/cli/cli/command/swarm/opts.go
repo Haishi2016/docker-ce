@@ -17,22 +17,25 @@ import (
 const (
 	defaultListenAddr = "0.0.0.0:2377"
 
-	flagCertExpiry          = "cert-expiry"
-	flagDispatcherHeartbeat = "dispatcher-heartbeat"
-	flagListenAddr          = "listen-addr"
-	flagAdvertiseAddr       = "advertise-addr"
-	flagDataPathAddr        = "data-path-addr"
-	flagQuiet               = "quiet"
-	flagRotate              = "rotate"
-	flagToken               = "token"
-	flagTaskHistoryLimit    = "task-history-limit"
-	flagExternalCA          = "external-ca"
-	flagMaxSnapshots        = "max-snapshots"
-	flagSnapshotInterval    = "snapshot-interval"
-	flagAutolock            = "autolock"
-	flagAvailability        = "availability"
-	flagCACert              = "ca-cert"
-	flagCAKey               = "ca-key"
+	flagCertExpiry                = "cert-expiry"
+	flagDispatcherHeartbeat       = "dispatcher-heartbeat"
+	flagListenAddr                = "listen-addr"
+	flagAdvertiseAddr             = "advertise-addr"
+	flagDataPathAddr              = "data-path-addr"
+	flagDataPathPort              = "data-path-port"
+	flagDefaultAddrPool           = "default-addr-pool"
+	flagDefaultAddrPoolMaskLength = "default-addr-pool-mask-length"
+	flagQuiet                     = "quiet"
+	flagRotate                    = "rotate"
+	flagToken                     = "token"
+	flagTaskHistoryLimit          = "task-history-limit"
+	flagExternalCA                = "external-ca"
+	flagMaxSnapshots              = "max-snapshots"
+	flagSnapshotInterval          = "snapshot-interval"
+	flagAutolock                  = "autolock"
+	flagAvailability              = "availability"
+	flagCACert                    = "ca-cert"
+	flagCAKey                     = "ca-key"
 )
 
 type swarmOptions struct {
@@ -230,7 +233,7 @@ func addSwarmFlags(flags *pflag.FlagSet, opts *swarmOptions) {
 	addSwarmCAFlags(flags, &opts.swarmCAOptions)
 }
 
-func (opts *swarmOptions) mergeSwarmSpec(spec *swarm.Spec, flags *pflag.FlagSet) {
+func (opts *swarmOptions) mergeSwarmSpec(spec *swarm.Spec, flags *pflag.FlagSet, caCert string) {
 	if flags.Changed(flagTaskHistoryLimit) {
 		spec.Orchestration.TaskHistoryRetentionLimit = &opts.taskHistoryLimit
 	}
@@ -246,7 +249,7 @@ func (opts *swarmOptions) mergeSwarmSpec(spec *swarm.Spec, flags *pflag.FlagSet)
 	if flags.Changed(flagAutolock) {
 		spec.EncryptionConfig.AutoLockManagers = opts.autolock
 	}
-	opts.mergeSwarmSpecCAFlags(spec, flags)
+	opts.mergeSwarmSpecCAFlags(spec, flags, caCert)
 }
 
 type swarmCAOptions struct {
@@ -254,17 +257,20 @@ type swarmCAOptions struct {
 	externalCA     ExternalCAOption
 }
 
-func (opts *swarmCAOptions) mergeSwarmSpecCAFlags(spec *swarm.Spec, flags *pflag.FlagSet) {
+func (opts *swarmCAOptions) mergeSwarmSpecCAFlags(spec *swarm.Spec, flags *pflag.FlagSet, caCert string) {
 	if flags.Changed(flagCertExpiry) {
 		spec.CAConfig.NodeCertExpiry = opts.nodeCertExpiry
 	}
 	if flags.Changed(flagExternalCA) {
 		spec.CAConfig.ExternalCAs = opts.externalCA.Value()
+		for _, ca := range spec.CAConfig.ExternalCAs {
+			ca.CACert = caCert
+		}
 	}
 }
 
 func (opts *swarmOptions) ToSpec(flags *pflag.FlagSet) swarm.Spec {
 	var spec swarm.Spec
-	opts.mergeSwarmSpec(&spec, flags)
+	opts.mergeSwarmSpec(&spec, flags, "")
 	return spec
 }

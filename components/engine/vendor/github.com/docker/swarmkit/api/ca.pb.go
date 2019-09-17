@@ -51,6 +51,8 @@
 		RemoveServiceResponse
 		ListServicesRequest
 		ListServicesResponse
+		ListServiceStatusesRequest
+		ListServiceStatusesResponse
 		CreateNetworkRequest
 		CreateNetworkResponse
 		GetNetworkRequest
@@ -86,6 +88,22 @@
 		CreateConfigResponse
 		RemoveConfigRequest
 		RemoveConfigResponse
+		CreateExtensionRequest
+		CreateExtensionResponse
+		RemoveExtensionRequest
+		RemoveExtensionResponse
+		GetExtensionRequest
+		GetExtensionResponse
+		CreateResourceRequest
+		CreateResourceResponse
+		RemoveResourceRequest
+		RemoveResourceResponse
+		UpdateResourceRequest
+		UpdateResourceResponse
+		GetResourceRequest
+		GetResourceResponse
+		ListResourcesRequest
+		ListResourcesResponse
 		SessionRequest
 		SessionMessage
 		HeartbeatRequest
@@ -205,6 +223,7 @@
 		EncryptionKey
 		ManagerStatus
 		FileTarget
+		RuntimeTarget
 		SecretReference
 		ConfigReference
 		BlacklistedCertificate

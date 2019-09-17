@@ -194,7 +194,7 @@ func (c *controller) handleKeyChange(keys []*types.EncryptionKey) error {
 func (c *controller) agentSetup(clusterProvider cluster.Provider) error {
 	agent := c.getAgent()
 
-	// If the agent is already present there is no need to try to initilize it again
+	// If the agent is already present there is no need to try to initialize it again
 	if agent != nil {
 		return nil
 	}
@@ -377,6 +377,9 @@ func (c *controller) agentClose() {
 	agent := c.agent
 	c.agent = nil
 	c.Unlock()
+
+	// when the agent is closed the cluster provider should be cleaned up
+	c.SetClusterProvider(nil)
 
 	if agent == nil {
 		return

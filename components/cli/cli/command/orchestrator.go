@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -15,11 +16,27 @@ const (
 	OrchestratorSwarm = Orchestrator("swarm")
 	// OrchestratorAll orchestrator
 	OrchestratorAll   = Orchestrator("all")
-	orchestratorUnset = Orchestrator("unset")
+	orchestratorUnset = Orchestrator("")
 
-	defaultOrchestrator      = OrchestratorSwarm
-	envVarDockerOrchestrator = "DOCKER_ORCHESTRATOR"
+	defaultOrchestrator           = OrchestratorSwarm
+	envVarDockerStackOrchestrator = "DOCKER_STACK_ORCHESTRATOR"
+	envVarDockerOrchestrator      = "DOCKER_ORCHESTRATOR"
 )
+
+// HasKubernetes returns true if defined orchestrator has Kubernetes capabilities.
+func (o Orchestrator) HasKubernetes() bool {
+	return o == OrchestratorKubernetes || o == OrchestratorAll
+}
+
+// HasSwarm returns true if defined orchestrator has Swarm capabilities.
+func (o Orchestrator) HasSwarm() bool {
+	return o == OrchestratorSwarm || o == OrchestratorAll
+}
+
+// HasAll returns true if defined orchestrator has both Swarm and Kubernetes capabilities.
+func (o Orchestrator) HasAll() bool {
+	return o == OrchestratorAll
+}
 
 func normalize(value string) (Orchestrator, error) {
 	switch value {
@@ -27,7 +44,7 @@ func normalize(value string) (Orchestrator, error) {
 		return OrchestratorKubernetes, nil
 	case "swarm":
 		return OrchestratorSwarm, nil
-	case "":
+	case "", "unset": // unset is the old value for orchestratorUnset. Keep accepting this for backward compat
 		return orchestratorUnset, nil
 	case "all":
 		return OrchestratorAll, nil
@@ -36,20 +53,30 @@ func normalize(value string) (Orchestrator, error) {
 	}
 }
 
-// GetOrchestrator checks DOCKER_ORCHESTRATOR environment variable and configuration file
+// NormalizeOrchestrator parses an orchestrator value and checks if it is valid
+func NormalizeOrchestrator(value string) (Orchestrator, error) {
+	return normalize(value)
+}
+
+// GetStackOrchestrator checks DOCKER_STACK_ORCHESTRATOR environment variable and configuration file
 // orchestrator value and returns user defined Orchestrator.
-func GetOrchestrator(flagValue, value string) (Orchestrator, error) {
+func GetStackOrchestrator(flagValue, contextValue, globalDefault string, stderr io.Writer) (Orchestrator, error) {
 	// Check flag
 	if o, err := normalize(flagValue); o != orchestratorUnset {
 		return o, err
 	}
 	// Check environment variable
-	env := os.Getenv(envVarDockerOrchestrator)
+	env := os.Getenv(envVarDockerStackOrchestrator)
+	if env == "" && os.Getenv(envVarDockerOrchestrator) != "" {
+		fmt.Fprintf(stderr, "WARNING: experimental environment variable %s is set. Please use %s instead\n", envVarDockerOrchestrator, envVarDockerStackOrchestrator)
+	}
 	if o, err := normalize(env); o != orchestratorUnset {
 		return o, err
 	}
-	// Check specified orchestrator
-	if o, err := normalize(value); o != orchestratorUnset {
+	if o, err := normalize(contextValue); o != orchestratorUnset {
+		return o, err
+	}
+	if o, err := normalize(globalDefault); o != orchestratorUnset {
 		return o, err
 	}
 	// Nothing set, use default orchestrator

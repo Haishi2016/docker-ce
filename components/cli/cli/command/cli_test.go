@@ -1,8 +1,12 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"runtime"
 	"testing"
@@ -10,14 +14,15 @@ import (
 	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/configfile"
 	"github.com/docker/cli/cli/flags"
+	clitypes "github.com/docker/cli/types"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/env"
-	"github.com/gotestyourself/gotestyourself/fs"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/env"
+	"gotest.tools/fs"
 )
 
 func TestNewAPIClientFromFlags(t *testing.T) {
@@ -43,15 +48,54 @@ func TestNewAPIClientFromFlags(t *testing.T) {
 	assert.Check(t, is.Equal(api.DefaultVersion, apiclient.ClientVersion()))
 }
 
+func TestNewAPIClientFromFlagsForDefaultSchema(t *testing.T) {
+	host := ":2375"
+	opts := &flags.CommonOptions{Hosts: []string{host}}
+	configFile := &configfile.ConfigFile{
+		HTTPHeaders: map[string]string{
+			"My-Header": "Custom-Value",
+		},
+	}
+	apiclient, err := NewAPIClientFromFlags(opts, configFile)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal("tcp://localhost"+host, apiclient.DaemonHost()))
+
+	expectedHeaders := map[string]string{
+		"My-Header":  "Custom-Value",
+		"User-Agent": UserAgent(),
+	}
+	assert.Check(t, is.DeepEqual(expectedHeaders, apiclient.(*client.Client).CustomHTTPHeaders()))
+	assert.Check(t, is.Equal(api.DefaultVersion, apiclient.ClientVersion()))
+}
+
 func TestNewAPIClientFromFlagsWithAPIVersionFromEnv(t *testing.T) {
 	customVersion := "v3.3.3"
 	defer env.Patch(t, "DOCKER_API_VERSION", customVersion)()
+	defer env.Patch(t, "DOCKER_HOST", ":2375")()
 
 	opts := &flags.CommonOptions{}
 	configFile := &configfile.ConfigFile{}
 	apiclient, err := NewAPIClientFromFlags(opts, configFile)
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(customVersion, apiclient.ClientVersion()))
+}
+
+func TestNewAPIClientFromFlagsWithHttpProxyEnv(t *testing.T) {
+	defer env.Patch(t, "HTTP_PROXY", "http://proxy.acme.com:1234")()
+	defer env.Patch(t, "DOCKER_HOST", "tcp://docker.acme.com:2376")()
+
+	opts := &flags.CommonOptions{}
+	configFile := &configfile.ConfigFile{}
+	apiclient, err := NewAPIClientFromFlags(opts, configFile)
+	assert.NilError(t, err)
+	transport, ok := apiclient.HTTPClient().Transport.(*http.Transport)
+	assert.Assert(t, ok)
+	assert.Assert(t, transport.Proxy != nil)
+	request, err := http.NewRequest(http.MethodGet, "tcp://docker.acme.com:2376", nil)
+	assert.NilError(t, err)
+	url, err := transport.Proxy(request)
+	assert.NilError(t, err)
+	assert.Check(t, is.Equal("http://proxy.acme.com:1234", url.String()))
 }
 
 type fakeClient struct {
@@ -150,6 +194,9 @@ func TestExperimentalCLI(t *testing.T) {
 			defer dir.Remove()
 			apiclient := &fakeClient{
 				version: defaultVersion,
+				pingFunc: func() (types.Ping, error) {
+					return types.Ping{Experimental: true, OSType: "linux", APIVersion: defaultVersion}, nil
+				},
 			}
 
 			cli := &DockerCli{client: apiclient, err: os.Stderr}
@@ -157,110 +204,6 @@ func TestExperimentalCLI(t *testing.T) {
 			err := cli.Initialize(flags.NewClientOptions())
 			assert.NilError(t, err)
 			assert.Check(t, is.Equal(testcase.expectedExperimentalCLI, cli.ClientInfo().HasExperimental))
-		})
-	}
-}
-
-func TestOrchestratorSwitch(t *testing.T) {
-	defaultVersion := "v0.00"
-
-	var testcases = []struct {
-		doc                  string
-		configfile           string
-		envOrchestrator      string
-		flagOrchestrator     string
-		expectedOrchestrator string
-		expectedKubernetes   bool
-		expectedSwarm        bool
-	}{
-		{
-			doc: "default",
-			configfile: `{
-			}`,
-			expectedOrchestrator: "swarm",
-			expectedKubernetes:   false,
-			expectedSwarm:        true,
-		},
-		{
-			doc: "kubernetesConfigFile",
-			configfile: `{
-				"orchestrator": "kubernetes"
-			}`,
-			expectedOrchestrator: "kubernetes",
-			expectedKubernetes:   true,
-			expectedSwarm:        false,
-		},
-		{
-			doc: "kubernetesEnv",
-			configfile: `{
-			}`,
-			envOrchestrator:      "kubernetes",
-			expectedOrchestrator: "kubernetes",
-			expectedKubernetes:   true,
-			expectedSwarm:        false,
-		},
-		{
-			doc: "kubernetesFlag",
-			configfile: `{
-			}`,
-			flagOrchestrator:     "kubernetes",
-			expectedOrchestrator: "kubernetes",
-			expectedKubernetes:   true,
-			expectedSwarm:        false,
-		},
-		{
-			doc: "allOrchestratorFlag",
-			configfile: `{
-			}`,
-			flagOrchestrator:     "all",
-			expectedOrchestrator: "all",
-			expectedKubernetes:   true,
-			expectedSwarm:        true,
-		},
-		{
-			doc: "envOverridesConfigFile",
-			configfile: `{
-				"orchestrator": "kubernetes"
-			}`,
-			envOrchestrator:      "swarm",
-			expectedOrchestrator: "swarm",
-			expectedKubernetes:   false,
-			expectedSwarm:        true,
-		},
-		{
-			doc: "flagOverridesEnv",
-			configfile: `{
-			}`,
-			envOrchestrator:      "kubernetes",
-			flagOrchestrator:     "swarm",
-			expectedOrchestrator: "swarm",
-			expectedKubernetes:   false,
-			expectedSwarm:        true,
-		},
-	}
-
-	for _, testcase := range testcases {
-		t.Run(testcase.doc, func(t *testing.T) {
-			dir := fs.NewDir(t, testcase.doc, fs.WithFile("config.json", testcase.configfile))
-			defer dir.Remove()
-			apiclient := &fakeClient{
-				version: defaultVersion,
-			}
-			if testcase.envOrchestrator != "" {
-				defer env.Patch(t, "DOCKER_ORCHESTRATOR", testcase.envOrchestrator)()
-			}
-
-			cli := &DockerCli{client: apiclient, err: os.Stderr}
-			cliconfig.SetDir(dir.Path())
-			options := flags.NewClientOptions()
-			if testcase.flagOrchestrator != "" {
-				options.Common.Orchestrator = testcase.flagOrchestrator
-			}
-			err := cli.Initialize(options)
-			assert.NilError(t, err)
-			assert.Check(t, is.Equal(testcase.expectedKubernetes, cli.ClientInfo().HasKubernetes()))
-			assert.Check(t, is.Equal(testcase.expectedSwarm, cli.ClientInfo().HasSwarm()))
-			assert.Check(t, is.Equal(testcase.expectedOrchestrator, string(cli.ClientInfo().Orchestrator)))
 		})
 	}
 }
@@ -329,4 +272,54 @@ func TestGetClientWithPassword(t *testing.T) {
 			assert.NilError(t, err)
 		})
 	}
+}
+
+func TestNewDockerCliAndOperators(t *testing.T) {
+	// Test default operations and also overriding default ones
+	cli, err := NewDockerCli(
+		WithContentTrust(true),
+		WithContainerizedClient(func(string) (clitypes.ContainerizedClient, error) { return nil, nil }),
+	)
+	assert.NilError(t, err)
+	// Check streams are initialized
+	assert.Check(t, cli.In() != nil)
+	assert.Check(t, cli.Out() != nil)
+	assert.Check(t, cli.Err() != nil)
+	assert.Equal(t, cli.ContentTrustEnabled(), true)
+	client, err := cli.NewContainerizedEngineClient("")
+	assert.NilError(t, err)
+	assert.Equal(t, client, nil)
+
+	// Apply can modify a dockerCli after construction
+	inbuf := bytes.NewBuffer([]byte("input"))
+	outbuf := bytes.NewBuffer(nil)
+	errbuf := bytes.NewBuffer(nil)
+	cli.Apply(
+		WithInputStream(ioutil.NopCloser(inbuf)),
+		WithOutputStream(outbuf),
+		WithErrorStream(errbuf),
+	)
+	// Check input stream
+	inputStream, err := ioutil.ReadAll(cli.In())
+	assert.NilError(t, err)
+	assert.Equal(t, string(inputStream), "input")
+	// Check output stream
+	fmt.Fprintf(cli.Out(), "output")
+	outputStream, err := ioutil.ReadAll(outbuf)
+	assert.NilError(t, err)
+	assert.Equal(t, string(outputStream), "output")
+	// Check error stream
+	fmt.Fprintf(cli.Err(), "error")
+	errStream, err := ioutil.ReadAll(errbuf)
+	assert.NilError(t, err)
+	assert.Equal(t, string(errStream), "error")
+}
+
+func TestInitializeShouldAlwaysCreateTheContextStore(t *testing.T) {
+	cli, err := NewDockerCli()
+	assert.NilError(t, err)
+	assert.NilError(t, cli.Initialize(flags.NewClientOptions(), WithInitializeClient(func(cli *DockerCli) (client.APIClient, error) {
+		return client.NewClientWithOpts()
+	})))
+	assert.Check(t, cli.ContextStore() != nil)
 }

@@ -16,6 +16,8 @@ var interpolateTypeCastMapping = map[interp.Path]interp.Cast{
 	servicePath("deploy", "replicas"):                                toInt,
 	servicePath("deploy", "update_config", "parallelism"):            toInt,
 	servicePath("deploy", "update_config", "max_failure_ratio"):      toFloat,
+	servicePath("deploy", "rollback_config", "parallelism"):          toInt,
+	servicePath("deploy", "rollback_config", "max_failure_ratio"):    toFloat,
 	servicePath("deploy", "restart_policy", "max_attempts"):          toInt,
 	servicePath("ports", interp.PathMatchList, "target"):             toInt,
 	servicePath("ports", interp.PathMatchList, "published"):          toInt,
@@ -64,11 +66,6 @@ func toBoolean(value string) (interface{}, error) {
 	}
 }
 
-func interpolateConfig(configDict map[string]interface{}, lookupEnv interp.LookupValue) (map[string]interface{}, error) {
-	return interp.Interpolate(
-		configDict,
-		interp.Options{
-			LookupValue:     lookupEnv,
-			TypeCastMapping: interpolateTypeCastMapping,
-		})
+func interpolateConfig(configDict map[string]interface{}, opts interp.Options) (map[string]interface{}, error) {
+	return interp.Interpolate(configDict, opts)
 }

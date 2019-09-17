@@ -11,10 +11,10 @@ import (
 	. "github.com/docker/cli/internal/test/builders"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/swarm"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/golden"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/golden"
 )
 
 func TestStackPsErrors(t *testing.T) {
@@ -44,120 +44,141 @@ func TestStackPsErrors(t *testing.T) {
 	for _, tc := range testCases {
 		cmd := newPsCommand(test.NewFakeCli(&fakeClient{
 			taskListFunc: tc.taskListFunc,
-		}))
+		}), &orchestrator)
 		cmd.SetArgs(tc.args)
 		cmd.SetOutput(ioutil.Discard)
 		assert.ErrorContains(t, cmd.Execute(), tc.expectedError)
 	}
 }
 
-func TestStackPsEmptyStack(t *testing.T) {
-	fakeCli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{}, nil
+func TestStackPs(t *testing.T) {
+	testCases := []struct {
+		doc                string
+		taskListFunc       func(types.TaskListOptions) ([]swarm.Task, error)
+		nodeInspectWithRaw func(string) (swarm.Node, []byte, error)
+		config             configfile.ConfigFile
+		args               []string
+		flags              map[string]string
+		expectedErr        string
+		golden             string
+	}{
+		{
+			doc:         "WithEmptyName",
+			args:        []string{"'   '"},
+			expectedErr: `invalid stack name: "'   '"`,
 		},
-	})
-	cmd := newPsCommand(fakeCli)
-	cmd.SetArgs([]string{"foo"})
-	cmd.SetOutput(ioutil.Discard)
+		{
+			doc: "WithEmptyStack",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{}, nil
+			},
+			args:        []string{"foo"},
+			expectedErr: "nothing found in stack: foo",
+		},
+		{
+			doc: "WithQuietOption",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(TaskID("id-foo"))}, nil
+			},
+			args: []string{"foo"},
+			flags: map[string]string{
+				"quiet": "true",
+			},
+			golden: "stack-ps-with-quiet-option.golden",
+		},
+		{
+			doc: "WithNoTruncOption",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(TaskID("xn4cypcov06f2w8gsbaf2lst3"))}, nil
+			},
+			args: []string{"foo"},
+			flags: map[string]string{
+				"no-trunc": "true",
+				"format":   "{{ .ID }}",
+			},
+			golden: "stack-ps-with-no-trunc-option.golden",
+		},
+		{
+			doc: "WithNoResolveOption",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(
+					TaskNodeID("id-node-foo"),
+				)}, nil
+			},
+			nodeInspectWithRaw: func(ref string) (swarm.Node, []byte, error) {
+				return *Node(NodeName("node-name-bar")), nil, nil
+			},
+			args: []string{"foo"},
+			flags: map[string]string{
+				"no-resolve": "true",
+				"format":     "{{ .Node }}",
+			},
+			golden: "stack-ps-with-no-resolve-option.golden",
+		},
+		{
+			doc: "WithFormat",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(TaskServiceID("service-id-foo"))}, nil
+			},
+			args: []string{"foo"},
+			flags: map[string]string{
+				"format": "{{ .Name }}",
+			},
+			golden: "stack-ps-with-format.golden",
+		},
+		{
+			doc: "WithConfigFormat",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(TaskServiceID("service-id-foo"))}, nil
+			},
+			config: configfile.ConfigFile{
+				TasksFormat: "{{ .Name }}",
+			},
+			args:   []string{"foo"},
+			golden: "stack-ps-with-config-format.golden",
+		},
+		{
+			doc: "WithoutFormat",
+			taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
+				return []swarm.Task{*Task(
+					TaskID("id-foo"),
+					TaskServiceID("service-id-foo"),
+					TaskNodeID("id-node"),
+					WithTaskSpec(TaskImage("myimage:mytag")),
+					TaskDesiredState(swarm.TaskStateReady),
+					WithStatus(TaskState(swarm.TaskStateFailed), Timestamp(time.Now().Add(-2*time.Hour))),
+				)}, nil
+			},
+			nodeInspectWithRaw: func(ref string) (swarm.Node, []byte, error) {
+				return *Node(NodeName("node-name-bar")), nil, nil
+			},
+			args:   []string{"foo"},
+			golden: "stack-ps-without-format.golden",
+		},
+	}
 
-	assert.Error(t, cmd.Execute(), "nothing found in stack: foo")
-	assert.Check(t, is.Equal("", fakeCli.OutBuffer().String()))
-}
+	for _, tc := range testCases {
+		t.Run(tc.doc, func(t *testing.T) {
+			cli := test.NewFakeCli(&fakeClient{
+				taskListFunc:       tc.taskListFunc,
+				nodeInspectWithRaw: tc.nodeInspectWithRaw,
+			})
+			cli.SetConfigFile(&tc.config)
 
-func TestStackPsWithQuietOption(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(TaskID("id-foo"))}, nil
-		},
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	cmd.Flags().Set("quiet", "true")
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-with-quiet-option.golden")
+			cmd := newPsCommand(cli, &orchestrator)
+			cmd.SetArgs(tc.args)
+			for key, value := range tc.flags {
+				cmd.Flags().Set(key, value)
+			}
+			cmd.SetOutput(ioutil.Discard)
 
-}
-
-func TestStackPsWithNoTruncOption(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(TaskID("xn4cypcov06f2w8gsbaf2lst3"))}, nil
-		},
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	cmd.Flags().Set("no-trunc", "true")
-	cmd.Flags().Set("format", "{{ .ID }}")
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-with-no-trunc-option.golden")
-}
-
-func TestStackPsWithNoResolveOption(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(
-				TaskNodeID("id-node-foo"),
-			)}, nil
-		},
-		nodeInspectWithRaw: func(ref string) (swarm.Node, []byte, error) {
-			return *Node(NodeName("node-name-bar")), nil, nil
-		},
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	cmd.Flags().Set("no-resolve", "true")
-	cmd.Flags().Set("format", "{{ .Node }}")
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-with-no-resolve-option.golden")
-}
-
-func TestStackPsWithFormat(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(TaskServiceID("service-id-foo"))}, nil
-		},
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	cmd.Flags().Set("format", "{{ .Name }}")
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-with-format.golden")
-}
-
-func TestStackPsWithConfigFormat(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(TaskServiceID("service-id-foo"))}, nil
-		},
-	})
-	cli.SetConfigFile(&configfile.ConfigFile{
-		TasksFormat: "{{ .Name }}",
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-with-config-format.golden")
-}
-
-func TestStackPsWithoutFormat(t *testing.T) {
-	cli := test.NewFakeCli(&fakeClient{
-		taskListFunc: func(options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{*Task(
-				TaskID("id-foo"),
-				TaskServiceID("service-id-foo"),
-				TaskNodeID("id-node"),
-				WithTaskSpec(TaskImage("myimage:mytag")),
-				TaskDesiredState(swarm.TaskStateReady),
-				WithStatus(TaskState(swarm.TaskStateFailed), Timestamp(time.Now().Add(-2*time.Hour))),
-			)}, nil
-		},
-		nodeInspectWithRaw: func(ref string) (swarm.Node, []byte, error) {
-			return *Node(NodeName("node-name-bar")), nil, nil
-		},
-	})
-	cmd := newPsCommand(cli)
-	cmd.SetArgs([]string{"foo"})
-	assert.NilError(t, cmd.Execute())
-	golden.Assert(t, cli.OutBuffer().String(), "stack-ps-without-format.golden")
+			if tc.expectedErr != "" {
+				assert.Error(t, cmd.Execute(), tc.expectedErr)
+				assert.Check(t, is.Equal("", cli.OutBuffer().String()))
+				return
+			}
+			assert.NilError(t, cmd.Execute())
+			golden.Assert(t, cli.OutBuffer().String(), tc.golden)
+		})
+	}
 }

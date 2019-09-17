@@ -2,14 +2,15 @@ package container
 
 import (
 	"fmt"
+	"io/ioutil"
 	"testing"
 
 	"github.com/docker/cli/internal/test"
 	"github.com/docker/cli/internal/test/notary"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
 )
 
 func TestRunLabel(t *testing.T) {
@@ -22,8 +23,7 @@ func TestRunLabel(t *testing.T) {
 		Version: "1.36",
 	})
 	cmd := NewRunCommand(cli)
-	cmd.Flags().Set("detach", "true")
-	cmd.SetArgs([]string{"--label", "foo", "busybox"})
+	cmd.SetArgs([]string{"--detach=true", "--label", "foo", "busybox"})
 	assert.NilError(t, cmd.Execute())
 }
 
@@ -66,6 +66,7 @@ func TestRunCommandWithContentTrustErrors(t *testing.T) {
 		cli.SetNotaryClient(tc.notaryFunc)
 		cmd := NewRunCommand(cli)
 		cmd.SetArgs(tc.args)
+		cmd.SetOutput(ioutil.Discard)
 		err := cmd.Execute()
 		assert.Assert(t, err != nil)
 		assert.Assert(t, is.Contains(cli.ErrBuffer().String(), tc.expectedError))

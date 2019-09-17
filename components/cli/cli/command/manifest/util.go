@@ -18,6 +18,7 @@ type osArch struct {
 // list of valid os/arch values (see "Optional Environment Variables" section
 // of https://golang.org/doc/install/source
 // Added linux/s390x as we know System z support already exists
+// Keep in sync with _docker_manifest_annotate in contrib/completion/bash/docker
 var validOSArches = map[osArch]bool{
 	{os: "darwin", arch: "386"}:      true,
 	{os: "darwin", arch: "amd64"}:    true,
@@ -34,6 +35,7 @@ var validOSArches = map[osArch]bool{
 	{os: "linux", arch: "ppc64le"}:   true,
 	{os: "linux", arch: "mips64"}:    true,
 	{os: "linux", arch: "mips64le"}:  true,
+	{os: "linux", arch: "riscv64"}:   true,
 	{os: "linux", arch: "s390x"}:     true,
 	{os: "netbsd", arch: "386"}:      true,
 	{os: "netbsd", arch: "amd64"}:    true,

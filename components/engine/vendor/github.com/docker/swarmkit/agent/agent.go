@@ -2,7 +2,7 @@ package agent
 
 import (
 	"bytes"
-	"fmt"
+	"context"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -11,7 +11,7 @@ import (
 	"github.com/docker/swarmkit/agent/exec"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
-	"golang.org/x/net/context"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -444,7 +444,7 @@ func (a *Agent) handleSessionMessage(ctx context.Context, message *api.SessionMe
 		if !same {
 			a.keys = message.NetworkBootstrapKeys
 			if err := a.config.Executor.SetNetworkBootstrapKeys(a.keys); err != nil {
-				panic(fmt.Errorf("configuring network key failed"))
+				return errors.Wrap(err, "configuring network key failed")
 			}
 		}
 	}
@@ -575,7 +575,7 @@ func (a *Agent) nodeDescriptionWithHostname(ctx context.Context, tlsInfo *api.No
 
 	// Override hostname and TLS info
 	if desc != nil {
-		if a.config.Hostname != "" && desc != nil {
+		if a.config.Hostname != "" {
 			desc.Hostname = a.config.Hostname
 		}
 		desc.TLSInfo = tlsInfo

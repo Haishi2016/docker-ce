@@ -16,7 +16,7 @@ import (
 	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/integration-cli/requirement"
-	"github.com/docker/docker/internal/test/registry"
+	"github.com/docker/docker/testutil/registry"
 )
 
 func ArchitectureIsNot(arch string) bool {
@@ -49,7 +49,7 @@ func MinimumAPIVersion(version string) func() bool {
 }
 
 func OnlyDefaultNetworks() bool {
-	cli, err := client.NewEnvClient()
+	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return false
 	}
@@ -58,11 +58,6 @@ func OnlyDefaultNetworks() bool {
 		return false
 	}
 	return true
-}
-
-// Deprecated: use skip.IfCondition(t, !testEnv.DaemonInfo.ExperimentalBuild)
-func ExperimentalDaemon() bool {
-	return testEnv.DaemonInfo.ExperimentalBuild
 }
 
 func IsAmd64() bool {
@@ -81,20 +76,8 @@ func NotPpc64le() bool {
 	return ArchitectureIsNot("ppc64le")
 }
 
-func NotS390X() bool {
-	return ArchitectureIsNot("s390x")
-}
-
-func SameHostDaemon() bool {
-	return testEnv.IsLocalDaemon()
-}
-
 func UnixCli() bool {
 	return isUnixCli
-}
-
-func ExecSupport() bool {
-	return supportsExec
 }
 
 func Network() bool {
@@ -176,13 +159,6 @@ func IsPausable() bool {
 	return true
 }
 
-func NotPausable() bool {
-	if testEnv.OSType == "windows" {
-		return testEnv.DaemonInfo.Isolation == "process"
-	}
-	return false
-}
-
 func IsolationIs(expectedIsolation string) bool {
 	return testEnv.OSType == "windows" && string(testEnv.DaemonInfo.Isolation) == expectedIsolation
 }
@@ -195,7 +171,7 @@ func IsolationIsProcess() bool {
 	return IsolationIs("process")
 }
 
-// RegistryHosting returns wether the host can host a registry (v2) or not
+// RegistryHosting returns whether the host can host a registry (v2) or not
 func RegistryHosting() bool {
 	// for now registry binary is built only if we're running inside
 	// container through `make test`. Figure that out by testing if
@@ -208,8 +184,12 @@ func SwarmInactive() bool {
 	return testEnv.DaemonInfo.Swarm.LocalNodeState == swarm.LocalNodeStateInactive
 }
 
+func TODOBuildkit() bool {
+	return os.Getenv("DOCKER_BUILDKIT") == ""
+}
+
 // testRequires checks if the environment satisfies the requirements
 // for the test to run or skips the tests.
-func testRequires(c requirement.SkipT, requirements ...requirement.Test) {
-	requirement.Is(c, requirements...)
+func testRequires(c interface{}, requirements ...requirement.Test) {
+	requirement.Is(c.(requirement.SkipT), requirements...)
 }

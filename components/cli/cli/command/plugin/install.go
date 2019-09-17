@@ -67,7 +67,7 @@ func (s pluginRegistryService) ResolveRepository(name reference.Named) (*registr
 }
 
 func newRegistryService() (registry.Service, error) {
-	svc, err := registry.NewService(registry.ServiceOptions{V2Only: true})
+	svc, err := registry.NewService(registry.ServiceOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func runInstall(dockerCli command.Cli, opts pluginOptions) error {
 	responseBody, err := dockerCli.Client().PluginInstall(ctx, localName, options)
 	if err != nil {
 		if strings.Contains(err.Error(), "(image) when fetching") {
-			return errors.New(err.Error() + " - Use `docker image pull`")
+			return errors.New(err.Error() + " - Use \"docker image pull\"")
 		}
 		return err
 	}

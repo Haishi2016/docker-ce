@@ -1,3 +1,5 @@
+// +build !windows
+
 package ipvlan // import "github.com/docker/docker/integration/network/ipvlan"
 
 import (
@@ -5,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/docker/docker/internal/test/environment"
+	"github.com/docker/docker/testutil/environment"
 )
 
 var testEnv *environment.Execution

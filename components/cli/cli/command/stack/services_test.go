@@ -10,10 +10,10 @@ import (
 	. "github.com/docker/cli/internal/test/builders"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/swarm"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/golden"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/golden"
 )
 
 func TestStackServicesErrors(t *testing.T) {
@@ -70,7 +70,7 @@ func TestStackServicesErrors(t *testing.T) {
 			nodeListFunc:    tc.nodeListFunc,
 			taskListFunc:    tc.taskListFunc,
 		})
-		cmd := newServicesCommand(cli)
+		cmd := newServicesCommand(cli, &orchestrator)
 		cmd.SetArgs(tc.args)
 		for key, value := range tc.flags {
 			cmd.Flags().Set(key, value)
@@ -80,13 +80,21 @@ func TestStackServicesErrors(t *testing.T) {
 	}
 }
 
+func TestRunServicesWithEmptyName(t *testing.T) {
+	cmd := newServicesCommand(test.NewFakeCli(&fakeClient{}), &orchestrator)
+	cmd.SetArgs([]string{"'   '"})
+	cmd.SetOutput(ioutil.Discard)
+
+	assert.ErrorContains(t, cmd.Execute(), `invalid stack name: "'   '"`)
+}
+
 func TestStackServicesEmptyServiceList(t *testing.T) {
 	fakeCli := test.NewFakeCli(&fakeClient{
 		serviceListFunc: func(options types.ServiceListOptions) ([]swarm.Service, error) {
 			return []swarm.Service{}, nil
 		},
 	})
-	cmd := newServicesCommand(fakeCli)
+	cmd := newServicesCommand(fakeCli, &orchestrator)
 	cmd.SetArgs([]string{"foo"})
 	assert.NilError(t, cmd.Execute())
 	assert.Check(t, is.Equal("", fakeCli.OutBuffer().String()))
@@ -99,7 +107,7 @@ func TestStackServicesWithQuietOption(t *testing.T) {
 			return []swarm.Service{*Service(ServiceID("id-foo"))}, nil
 		},
 	})
-	cmd := newServicesCommand(cli)
+	cmd := newServicesCommand(cli, &orchestrator)
 	cmd.Flags().Set("quiet", "true")
 	cmd.SetArgs([]string{"foo"})
 	assert.NilError(t, cmd.Execute())
@@ -114,7 +122,7 @@ func TestStackServicesWithFormat(t *testing.T) {
 			}, nil
 		},
 	})
-	cmd := newServicesCommand(cli)
+	cmd := newServicesCommand(cli, &orchestrator)
 	cmd.SetArgs([]string{"foo"})
 	cmd.Flags().Set("format", "{{ .Name }}")
 	assert.NilError(t, cmd.Execute())
@@ -132,7 +140,7 @@ func TestStackServicesWithConfigFormat(t *testing.T) {
 	cli.SetConfigFile(&configfile.ConfigFile{
 		ServicesFormat: "{{ .Name }}",
 	})
-	cmd := newServicesCommand(cli)
+	cmd := newServicesCommand(cli, &orchestrator)
 	cmd.SetArgs([]string{"foo"})
 	assert.NilError(t, cmd.Execute())
 	golden.Assert(t, cli.OutBuffer().String(), "stack-services-with-config-format.golden")
@@ -155,7 +163,7 @@ func TestStackServicesWithoutFormat(t *testing.T) {
 			)}, nil
 		},
 	})
-	cmd := newServicesCommand(cli)
+	cmd := newServicesCommand(cli, &orchestrator)
 	cmd.SetArgs([]string{"foo"})
 	assert.NilError(t, cmd.Execute())
 	golden.Assert(t, cli.OutBuffer().String(), "stack-services-without-format.golden")

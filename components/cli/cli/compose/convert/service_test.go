@@ -13,9 +13,9 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
 )
 
 func TestConvertRestartPolicyFromNone(t *testing.T) {
@@ -124,8 +124,8 @@ func TestConvertResourcesOnlyMemory(t *testing.T) {
 
 func TestConvertHealthcheck(t *testing.T) {
 	retries := uint64(10)
-	timeout := 30 * time.Second
-	interval := 2 * time.Millisecond
+	timeout := composetypes.Duration(30 * time.Second)
+	interval := composetypes.Duration(2 * time.Millisecond)
 	source := &composetypes.HealthCheckConfig{
 		Test:     []string{"EXEC", "touch", "/foo"},
 		Timeout:  &timeout,
@@ -134,8 +134,8 @@ func TestConvertHealthcheck(t *testing.T) {
 	}
 	expected := &container.HealthConfig{
 		Test:     source.Test,
-		Timeout:  timeout,
-		Interval: interval,
+		Timeout:  time.Duration(timeout),
+		Interval: time.Duration(interval),
 		Retries:  10,
 	}
 
@@ -247,11 +247,8 @@ func TestConvertServiceNetworks(t *testing.T) {
 		},
 	}
 
-	sortedConfigs := byTargetSort(configs)
-	sort.Sort(&sortedConfigs)
-
 	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(expected, []swarm.NetworkAttachmentConfig(sortedConfigs)))
+	assert.Check(t, is.DeepEqual(expected, configs))
 }
 
 func TestConvertServiceNetworksCustomDefault(t *testing.T) {
@@ -275,20 +272,6 @@ func TestConvertServiceNetworksCustomDefault(t *testing.T) {
 
 	assert.NilError(t, err)
 	assert.Check(t, is.DeepEqual(expected, []swarm.NetworkAttachmentConfig(configs)))
-}
-
-type byTargetSort []swarm.NetworkAttachmentConfig
-
-func (s byTargetSort) Len() int {
-	return len(s)
-}
-
-func (s byTargetSort) Less(i, j int) bool {
-	return strings.Compare(s[i].Target, s[j].Target) < 0
-}
-
-func (s byTargetSort) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
 }
 
 func TestConvertDNSConfigEmpty(t *testing.T) {
@@ -331,30 +314,98 @@ func TestConvertDNSConfigSearch(t *testing.T) {
 }
 
 func TestConvertCredentialSpec(t *testing.T) {
-	swarmSpec, err := convertCredentialSpec(composetypes.CredentialSpecConfig{})
-	assert.NilError(t, err)
-	assert.Check(t, is.Nil(swarmSpec))
+	tests := []struct {
+		name        string
+		in          composetypes.CredentialSpecConfig
+		out         *swarm.CredentialSpec
+		configs     []*swarm.ConfigReference
+		expectedErr string
+	}{
+		{
+			name: "empty",
+		},
+		{
+			name:        "config-and-file",
+			in:          composetypes.CredentialSpecConfig{Config: "0bt9dmxjvjiqermk6xrop3ekq", File: "somefile.json"},
+			expectedErr: `invalid credential spec: cannot specify both "Config" and "File"`,
+		},
+		{
+			name:        "config-and-registry",
+			in:          composetypes.CredentialSpecConfig{Config: "0bt9dmxjvjiqermk6xrop3ekq", Registry: "testing"},
+			expectedErr: `invalid credential spec: cannot specify both "Config" and "Registry"`,
+		},
+		{
+			name:        "file-and-registry",
+			in:          composetypes.CredentialSpecConfig{File: "somefile.json", Registry: "testing"},
+			expectedErr: `invalid credential spec: cannot specify both "File" and "Registry"`,
+		},
+		{
+			name:        "config-and-file-and-registry",
+			in:          composetypes.CredentialSpecConfig{Config: "0bt9dmxjvjiqermk6xrop3ekq", File: "somefile.json", Registry: "testing"},
+			expectedErr: `invalid credential spec: cannot specify both "Config", "File", and "Registry"`,
+		},
+		{
+			name:        "missing-config-reference",
+			in:          composetypes.CredentialSpecConfig{Config: "missing"},
+			expectedErr: "invalid credential spec: spec specifies config missing, but no such config can be found",
+			configs: []*swarm.ConfigReference{
+				{
+					ConfigName: "someName",
+					ConfigID:   "missing",
+				},
+			},
+		},
+		{
+			name: "namespaced-config",
+			in:   composetypes.CredentialSpecConfig{Config: "name"},
+			configs: []*swarm.ConfigReference{
+				{
+					ConfigName: "namespaced-config_name",
+					ConfigID:   "someID",
+				},
+			},
+			out: &swarm.CredentialSpec{Config: "someID"},
+		},
+		{
+			name: "config",
+			in:   composetypes.CredentialSpecConfig{Config: "someName"},
+			configs: []*swarm.ConfigReference{
+				{
+					ConfigName: "someOtherName",
+					ConfigID:   "someOtherID",
+				}, {
+					ConfigName: "someName",
+					ConfigID:   "someID",
+				},
+			},
+			out: &swarm.CredentialSpec{Config: "someID"},
+		},
+		{
+			name: "file",
+			in:   composetypes.CredentialSpecConfig{File: "somefile.json"},
+			out:  &swarm.CredentialSpec{File: "somefile.json"},
+		},
+		{
+			name: "registry",
+			in:   composetypes.CredentialSpecConfig{Registry: "testing"},
+			out:  &swarm.CredentialSpec{Registry: "testing"},
+		},
+	}
 
-	swarmSpec, err = convertCredentialSpec(composetypes.CredentialSpecConfig{
-		File: "/foo",
-	})
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(swarmSpec.File, "/foo"))
-	assert.Check(t, is.Equal(swarmSpec.Registry, ""))
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			namespace := NewNamespace(tc.name)
+			swarmSpec, err := convertCredentialSpec(namespace, tc.in, tc.configs)
 
-	swarmSpec, err = convertCredentialSpec(composetypes.CredentialSpecConfig{
-		Registry: "foo",
-	})
-	assert.NilError(t, err)
-	assert.Check(t, is.Equal(swarmSpec.File, ""))
-	assert.Check(t, is.Equal(swarmSpec.Registry, "foo"))
-
-	swarmSpec, err = convertCredentialSpec(composetypes.CredentialSpecConfig{
-		File:     "/asdf",
-		Registry: "foo",
-	})
-	assert.Check(t, is.ErrorContains(err, ""))
-	assert.Check(t, is.Nil(swarmSpec))
+			if tc.expectedErr != "" {
+				assert.Error(t, err, tc.expectedErr)
+			} else {
+				assert.NilError(t, err)
+			}
+			assert.DeepEqual(t, swarmSpec, tc.out)
+		})
+	}
 }
 
 func TestConvertUpdateConfigOrder(t *testing.T) {
@@ -484,9 +535,14 @@ func TestConvertServiceSecrets(t *testing.T) {
 
 func TestConvertServiceConfigs(t *testing.T) {
 	namespace := Namespace{name: "foo"}
-	configs := []composetypes.ServiceConfigObjConfig{
-		{Source: "foo_config"},
-		{Source: "bar_config"},
+	service := composetypes.ServiceConfig{
+		Configs: []composetypes.ServiceConfigObjConfig{
+			{Source: "foo_config"},
+			{Source: "bar_config"},
+		},
+		CredentialSpec: composetypes.CredentialSpecConfig{
+			Config: "baz_config",
+		},
 	}
 	configSpecs := map[string]composetypes.ConfigObjConfig{
 		"foo_config": {
@@ -495,18 +551,23 @@ func TestConvertServiceConfigs(t *testing.T) {
 		"bar_config": {
 			Name: "bar_config",
 		},
+		"baz_config": {
+			Name: "baz_config",
+		},
 	}
 	client := &fakeClient{
 		configListFunc: func(opts types.ConfigListOptions) ([]swarm.Config, error) {
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "foo_config"))
 			assert.Check(t, is.Contains(opts.Filters.Get("name"), "bar_config"))
+			assert.Check(t, is.Contains(opts.Filters.Get("name"), "baz_config"))
 			return []swarm.Config{
 				{Spec: swarm.ConfigSpec{Annotations: swarm.Annotations{Name: "foo_config"}}},
 				{Spec: swarm.ConfigSpec{Annotations: swarm.Annotations{Name: "bar_config"}}},
+				{Spec: swarm.ConfigSpec{Annotations: swarm.Annotations{Name: "baz_config"}}},
 			}, nil
 		},
 	}
-	refs, err := convertServiceConfigObjs(client, namespace, configs, configSpecs)
+	refs, err := convertServiceConfigObjs(client, namespace, service, configSpecs)
 	assert.NilError(t, err)
 	expected := []*swarm.ConfigReference{
 		{
@@ -517,6 +578,10 @@ func TestConvertServiceConfigs(t *testing.T) {
 				GID:  "0",
 				Mode: 0444,
 			},
+		},
+		{
+			ConfigName: "baz_config",
+			Runtime:    &swarm.ConfigReferenceRuntimeTarget{},
 		},
 		{
 			ConfigName: "foo_config",

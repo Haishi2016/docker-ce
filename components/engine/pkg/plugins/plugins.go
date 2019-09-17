@@ -11,7 +11,7 @@
 // The plugins need to implement an HTTP server and bind this to the UNIX socket
 // or the address specified in the spec files.
 // A handshake is send at /Plugin.Activate, and plugins are expected to return
-// a Manifest with a list of of Docker subsystems which this plugin implements.
+// a Manifest with a list of Docker subsystems which this plugin implements.
 //
 // In order to use a plugins, you can use the ``Get`` with the name of the
 // plugin and the subsystem it implements.
@@ -254,6 +254,9 @@ func get(name string) (*Plugin, error) {
 
 // Get returns the plugin given the specified name and requested implementation.
 func Get(name, imp string) (*Plugin, error) {
+	if name == "" {
+		return nil, errors.New("Unable to find plugin without name")
+	}
 	pl, err := get(name)
 	if err != nil {
 		return nil, err

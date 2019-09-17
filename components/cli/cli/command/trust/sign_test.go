@@ -12,15 +12,15 @@ import (
 	"github.com/docker/cli/cli/trust"
 	"github.com/docker/cli/internal/test"
 	notaryfake "github.com/docker/cli/internal/test/notary"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
-	"github.com/gotestyourself/gotestyourself/skip"
 	"github.com/theupdateframework/notary"
 	"github.com/theupdateframework/notary/client"
 	"github.com/theupdateframework/notary/client/changelist"
 	"github.com/theupdateframework/notary/passphrase"
 	"github.com/theupdateframework/notary/trustpinning"
 	"github.com/theupdateframework/notary/tuf/data"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/skip"
 )
 
 const passwd = "password"
@@ -148,7 +148,7 @@ func TestAddStageSigners(t *testing.T) {
 	assert.NilError(t, err)
 	changeList := cl.List()
 	assert.Check(t, is.Len(changeList, 4))
-	// ordering is determinstic:
+	// ordering is deterministic:
 
 	// first change is for targets/user key creation
 	newSignerKeyChange := changeList[0]
@@ -304,6 +304,6 @@ func TestSignCommandLocalFlag(t *testing.T) {
 	cmd := newSignCommand(cli)
 	cmd.SetArgs([]string{"--local", "reg-name.io/image:red"})
 	cmd.SetOutput(ioutil.Discard)
-	assert.ErrorContains(t, cmd.Execute(), "error during connect: Get /images/reg-name.io/image:red/json: unsupported protocol scheme")
+	assert.ErrorContains(t, cmd.Execute(), "error contacting notary server: dial tcp: lookup reg-name.io")
 
 }

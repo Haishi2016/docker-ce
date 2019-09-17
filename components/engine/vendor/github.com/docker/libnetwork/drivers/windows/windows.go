@@ -25,6 +25,7 @@ import (
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/netlabel"
+	"github.com/docker/libnetwork/portmapper"
 	"github.com/docker/libnetwork/types"
 	"github.com/sirupsen/logrus"
 )
@@ -88,11 +89,12 @@ type hnsEndpoint struct {
 }
 
 type hnsNetwork struct {
-	id        string
-	created   bool
-	config    *networkConfiguration
-	endpoints map[string]*hnsEndpoint // key: endpoint id
-	driver    *driver                 // The network's driver
+	id         string
+	created    bool
+	config     *networkConfiguration
+	endpoints  map[string]*hnsEndpoint // key: endpoint id
+	driver     *driver                 // The network's driver
+	portMapper *portmapper.PortMapper
 	sync.Mutex
 }
 
@@ -109,7 +111,10 @@ const (
 
 // IsBuiltinLocalDriver validates if network-type is a builtin local-scoped driver
 func IsBuiltinLocalDriver(networkType string) bool {
-	if "l2bridge" == networkType || "l2tunnel" == networkType || "nat" == networkType || "ics" == networkType || "transparent" == networkType {
+	if "l2bridge" == networkType || "l2tunnel" == networkType ||
+		"nat" == networkType || "ics" == networkType ||
+		"transparent" == networkType || "internal" == networkType ||
+		"private" == networkType {
 		return true
 	}
 
@@ -252,10 +257,11 @@ func (d *driver) DecodeTableEntry(tablename string, key string, value []byte) (s
 
 func (d *driver) createNetwork(config *networkConfiguration) error {
 	network := &hnsNetwork{
-		id:        config.ID,
-		endpoints: make(map[string]*hnsEndpoint),
-		config:    config,
-		driver:    d,
+		id:         config.ID,
+		endpoints:  make(map[string]*hnsEndpoint),
+		config:     config,
+		driver:     d,
+		portMapper: portmapper.New(""),
 	}
 
 	d.Lock()
@@ -415,7 +421,7 @@ func (d *driver) DeleteNetwork(nid string) error {
 	// delele endpoints belong to this network
 	for _, ep := range n.endpoints {
 		if err := d.storeDelete(ep); err != nil {
-			logrus.Warnf("Failed to remove bridge endpoint %s from store: %v", ep.id[0:7], err)
+			logrus.Warnf("Failed to remove bridge endpoint %.7s from store: %v", ep.id, err)
 		}
 	}
 
@@ -430,7 +436,7 @@ func convertQosPolicies(qosPolicies []types.QosPolicy) ([]json.RawMessage, error
 	// understood by the HCS.
 	for _, elem := range qosPolicies {
 		encodedPolicy, err := json.Marshal(hcsshim.QosPolicy{
-			Type: "QOS",
+			Type:                            "QOS",
 			MaximumOutgoingBandwidthInBytes: elem.MaxEgressBandwidth,
 		})
 
@@ -459,7 +465,7 @@ func ConvertPortBindings(portBindings []types.PortBinding) ([]json.RawMessage, e
 			return nil, fmt.Errorf("Windows does not support more than one host port in NAT settings")
 		}
 
-		if len(elem.HostIP) != 0 {
+		if len(elem.HostIP) != 0 && !elem.HostIP.IsUnspecified() {
 			return nil, fmt.Errorf("Windows does not support host IP addresses in NAT settings")
 		}
 
@@ -610,7 +616,27 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		endpointStruct.MacAddress = strings.Replace(macAddress.String(), ":", "-", -1)
 	}
 
-	endpointStruct.Policies, err = ConvertPortBindings(epConnectivity.PortBindings)
+	portMapping := epConnectivity.PortBindings
+
+	if n.config.Type == "l2bridge" || n.config.Type == "l2tunnel" {
+		ip := net.IPv4(0, 0, 0, 0)
+		if ifInfo.Address() != nil {
+			ip = ifInfo.Address().IP
+		}
+
+		portMapping, err = AllocatePorts(n.portMapper, portMapping, ip)
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			if err != nil {
+				ReleasePorts(n.portMapper, portMapping)
+			}
+		}()
+	}
+
+	endpointStruct.Policies, err = ConvertPortBindings(portMapping)
 	if err != nil {
 		return err
 	}
@@ -704,7 +730,7 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 	}
 
 	if err = d.storeUpdate(endpoint); err != nil {
-		logrus.Errorf("Failed to save endpoint %s to store: %v", endpoint.id[0:7], err)
+		logrus.Errorf("Failed to save endpoint %.7s to store: %v", endpoint.id, err)
 	}
 
 	return nil
@@ -721,6 +747,10 @@ func (d *driver) DeleteEndpoint(nid, eid string) error {
 		return err
 	}
 
+	if n.config.Type == "l2bridge" || n.config.Type == "l2tunnel" {
+		ReleasePorts(n.portMapper, ep.portMapping)
+	}
+
 	n.Lock()
 	delete(n.endpoints, eid)
 	n.Unlock()
@@ -731,7 +761,7 @@ func (d *driver) DeleteEndpoint(nid, eid string) error {
 	}
 
 	if err := d.storeDelete(ep); err != nil {
-		logrus.Warnf("Failed to remove bridge endpoint %s from store: %v", ep.id[0:7], err)
+		logrus.Warnf("Failed to remove bridge endpoint %.7s from store: %v", ep.id, err)
 	}
 	return nil
 }

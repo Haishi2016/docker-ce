@@ -11,11 +11,11 @@ import (
 	"github.com/docker/cli/e2e/internal/fixtures"
 	"github.com/docker/cli/internal/test/environment"
 	"github.com/docker/docker/api/types"
-	"github.com/gotestyourself/gotestyourself/assert"
-	"github.com/gotestyourself/gotestyourself/fs"
-	"github.com/gotestyourself/gotestyourself/icmd"
-	"github.com/gotestyourself/gotestyourself/skip"
 	"github.com/pkg/errors"
+	"gotest.tools/assert"
+	"gotest.tools/fs"
+	"gotest.tools/icmd"
+	"gotest.tools/skip"
 )
 
 const registryPrefix = "registry:5000"
@@ -106,7 +106,7 @@ func ensureBasicPluginBin() (string, error) {
 	}
 	installPath := filepath.Join(os.Getenv("GOPATH"), "bin", name)
 	cmd := exec.Command(goBin, "build", "-o", installPath, "./basic")
-	cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", errors.Wrapf(err, "error building basic plugin bin: %s", string(out))
 	}

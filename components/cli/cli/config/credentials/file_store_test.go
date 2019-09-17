@@ -3,9 +3,9 @@ package credentials
 import (
 	"testing"
 
-	"github.com/docker/docker/api/types"
-	"github.com/gotestyourself/gotestyourself/assert"
-	is "github.com/gotestyourself/gotestyourself/assert/cmp"
+	"github.com/docker/cli/cli/config/types"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
 )
 
 type fakeStore struct {

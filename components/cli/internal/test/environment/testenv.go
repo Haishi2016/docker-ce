@@ -3,10 +3,13 @@ package environment
 import (
 	"os"
 	"strings"
+	"testing"
 	"time"
 
-	"github.com/gotestyourself/gotestyourself/poll"
 	"github.com/pkg/errors"
+	"gotest.tools/icmd"
+	"gotest.tools/poll"
+	"gotest.tools/skip"
 )
 
 // Setup a new environment
@@ -76,3 +79,12 @@ func boolFromString(val string) bool {
 
 // DefaultPollSettings used with gotestyourself/poll
 var DefaultPollSettings = poll.WithDelay(100 * time.Millisecond)
+
+// SkipIfNotExperimentalDaemon returns whether the test docker daemon is in experimental mode
+func SkipIfNotExperimentalDaemon(t *testing.T) {
+	t.Helper()
+	result := icmd.RunCmd(icmd.Command("docker", "info", "--format", "{{.ExperimentalBuild}}"))
+	result.Assert(t, icmd.Expected{Err: icmd.None})
+	experimentalBuild := strings.TrimSpace(result.Stdout()) == "true"
+	skip.If(t, !experimentalBuild, "running against a non-experimental daemon")
+}

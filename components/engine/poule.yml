@@ -91,39 +91,11 @@
         }
       - type:       rebuild
         settings: {
+            configurations: [ windowsRS5 ],
+            label:          "rebuild/windowsRS5-process",
+        }
+      - type:       rebuild
+        settings: {
             configurations: [ z ],
             label:          "rebuild/z",
-        }
-
-# Once a day, randomly assign pull requests older than 2 weeks.
-- schedule:         "@daily"
-  operations:
-      - type:       random-assign
-        filters: {
-            age:    "2w",
-            is:     "pr",
-        }
-        settings: {
-            users: [
-                "aaronlehmann",
-                "akihirosuda",
-                "coolljt0725",
-                "cpuguy83",
-                "crosbymichael",
-                "dnephin",
-                "duglin",
-                "fntlnz",
-                "johnstep",
-                "justincormack",
-                "mhbauer",
-                "mlaventure",
-                "runcom",
-                "stevvooe",
-                "thajeztah",
-                "tiborvass",
-                "tonistiigi",
-                "vdemeester",
-                "vieux",
-                "yongtang",
-            ]
         }

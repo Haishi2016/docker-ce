@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/server/router"
 	"github.com/docker/docker/api/server/router/debug"
 	"github.com/docker/docker/dockerversion"
+	"github.com/docker/docker/errdefs"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 )
@@ -31,11 +32,10 @@ type Config struct {
 
 // Server contains instance details for the server
 type Server struct {
-	cfg           *Config
-	servers       []*HTTPServer
-	routers       []router.Router
-	routerSwapper *routerSwapper
-	middlewares   []middleware.Middleware
+	cfg         *Config
+	servers     []*HTTPServer
+	routers     []router.Router
+	middlewares []middleware.Middleware
 }
 
 // New returns a new instance of the server based on the specified configuration.
@@ -79,7 +79,7 @@ func (s *Server) Close() {
 func (s *Server) serveAPI() error {
 	var chErrors = make(chan error, len(s.servers))
 	for _, srv := range s.servers {
-		srv.srv.Handler = s.routerSwapper
+		srv.srv.Handler = s.createMux()
 		go func(srv *HTTPServer) {
 			var err error
 			logrus.Infof("API listen on %s", srv.l.Addr())
@@ -129,8 +129,8 @@ func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 
 		// use intermediate variable to prevent "should not use basic type
 		// string as key in context.WithValue" golint errors
-		var ki interface{} = dockerversion.UAStringKey
-		ctx := context.WithValue(context.Background(), ki, r.Header.Get("User-Agent"))
+		ctx := context.WithValue(r.Context(), dockerversion.UAStringKey{}, r.Header.Get("User-Agent"))
+		r = r.WithContext(ctx)
 		handlerFunc := s.handlerWithGlobalMiddlewares(handler)
 
 		vars := mux.Vars(r)
@@ -139,7 +139,7 @@ func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 		}
 
 		if err := handlerFunc(ctx, w, r, vars); err != nil {
-			statusCode := httputils.GetHTTPErrorStatusCode(err)
+			statusCode := errdefs.GetHTTPErrorStatusCode(err)
 			if statusCode >= 500 {
 				logrus.Errorf("Handler for %s %s returned error: %v", r.Method, r.URL.Path, err)
 			}
@@ -149,14 +149,9 @@ func (s *Server) makeHTTPHandler(handler httputils.APIFunc) http.HandlerFunc {
 }
 
 // InitRouter initializes the list of routers for the server.
-// This method also enables the Go profiler if enableProfiler is true.
+// This method also enables the Go profiler.
 func (s *Server) InitRouter(routers ...router.Router) {
 	s.routers = append(s.routers, routers...)
-
-	m := s.createMux()
-	s.routerSwapper = &routerSwapper{
-		router: m,
-	}
 }
 
 type pageNotFoundError struct{}
@@ -192,6 +187,7 @@ func (s *Server) createMux() *mux.Router {
 	notFoundHandler := httputils.MakeErrorHandler(pageNotFoundError{})
 	m.HandleFunc(versionMatcher+"/{path:.*}", notFoundHandler)
 	m.NotFoundHandler = notFoundHandler
+	m.MethodNotAllowedHandler = notFoundHandler
 
 	return m
 }

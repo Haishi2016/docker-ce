@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 	// Import builders to get the builder function as package function
 	. "github.com/docker/cli/internal/test/builders"
-	"github.com/gotestyourself/gotestyourself/assert"
-	"github.com/gotestyourself/gotestyourself/golden"
+	"gotest.tools/assert"
+	"gotest.tools/golden"
 )
 
 func TestVolumeListErrors(t *testing.T) {
@@ -108,4 +108,22 @@ func TestVolumeListWithFormat(t *testing.T) {
 	cmd.Flags().Set("format", "{{ .Name }} {{ .Driver }} {{ .Labels }}")
 	assert.NilError(t, cmd.Execute())
 	golden.Assert(t, cli.OutBuffer().String(), "volume-list-with-format.golden")
+}
+
+func TestVolumeListSortOrder(t *testing.T) {
+	cli := test.NewFakeCli(&fakeClient{
+		volumeListFunc: func(filter filters.Args) (volumetypes.VolumeListOKBody, error) {
+			return volumetypes.VolumeListOKBody{
+				Volumes: []*types.Volume{
+					Volume(VolumeName("volume-2-foo")),
+					Volume(VolumeName("volume-10-foo")),
+					Volume(VolumeName("volume-1-foo")),
+				},
+			}, nil
+		},
+	})
+	cmd := newListCommand(cli)
+	cmd.Flags().Set("format", "{{ .Name }}")
+	assert.NilError(t, cmd.Execute())
+	golden.Assert(t, cli.OutBuffer().String(), "volume-list-sort.golden")
 }

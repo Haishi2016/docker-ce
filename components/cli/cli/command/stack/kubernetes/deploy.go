@@ -4,20 +4,16 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/docker/cli/cli/command"
-	"github.com/docker/cli/cli/command/stack/loader"
 	"github.com/docker/cli/cli/command/stack/options"
+	composetypes "github.com/docker/cli/cli/compose/types"
+	"github.com/docker/cli/cli/streams"
 	"github.com/morikuni/aec"
-	"github.com/pkg/errors"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 // RunDeploy is the kubernetes implementation of docker stack deploy
-func RunDeploy(dockerCli *KubeCli, opts options.Deploy) error {
+func RunDeploy(dockerCli *KubeCli, opts options.Deploy, cfg *composetypes.Config) error {
 	cmdOut := dockerCli.Out()
-	// Check arguments
-	if len(opts.Composefiles) == 0 {
-		return errors.Errorf("Please specify only one compose file (with --compose-file).")
-	}
 
 	// Initialize clients
 	composeClient, err := dockerCli.composeClient()
@@ -29,11 +25,6 @@ func RunDeploy(dockerCli *KubeCli, opts options.Deploy) error {
 		return err
 	}
 
-	// Parse the compose file
-	cfg, err := loader.LoadComposefile(dockerCli, opts)
-	if err != nil {
-		return err
-	}
 	stack, err := stacks.FromCompose(dockerCli.Err(), opts.Namespace, cfg)
 	if err != nil {
 		return err
@@ -47,15 +38,7 @@ func RunDeploy(dockerCli *KubeCli, opts options.Deploy) error {
 		return err
 	}
 
-	if err := stack.createFileBasedConfigMaps(configMaps); err != nil {
-		return err
-	}
-
-	if err := stack.createFileBasedSecrets(secrets); err != nil {
-		return err
-	}
-
-	if err = stacks.CreateOrUpdate(stack); err != nil {
+	if err := createResources(stack, stacks, configMaps, secrets); err != nil {
 		return err
 	}
 
@@ -80,15 +63,35 @@ func RunDeploy(dockerCli *KubeCli, opts options.Deploy) error {
 		}
 	}()
 
-	err = watcher.Watch(stack.name, stack.getServices(), statusUpdates)
+	err = watcher.Watch(stack.Name, stack.getServices(), statusUpdates)
 	close(statusUpdates)
 	<-displayDone
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmdOut, "\nStack %s is stable and running\n\n", stack.name)
+	fmt.Fprintf(cmdOut, "\nStack %s is stable and running\n\n", stack.Name)
 	return nil
 
+}
+
+func createResources(stack Stack, stacks StackClient, configMaps corev1.ConfigMapInterface, secrets corev1.SecretInterface) error {
+	var childResources []childResource
+
+	cr, err := stack.createFileBasedConfigMaps(configMaps)
+	childResources = append(childResources, cr...) // make sure we collect childresources already created in case of failure
+	if err != nil {
+		deleteChildResources(childResources)
+		return err
+	}
+
+	cr, err = stack.createFileBasedSecrets(secrets)
+	childResources = append(childResources, cr...) // make sure we collect childresources already created in case of failure
+	if err != nil {
+		deleteChildResources(childResources)
+		return err
+	}
+
+	return stacks.CreateOrUpdate(stack, childResources)
 }
 
 type statusDisplay interface {
@@ -114,7 +117,7 @@ func metaStateFromStatus(status serviceStatus) metaServiceState {
 }
 
 type forwardOnlyStatusDisplay struct {
-	o      *command.OutStream
+	o      *streams.Out
 	states map[string]metaServiceState
 }
 
@@ -127,7 +130,7 @@ func (d *forwardOnlyStatusDisplay) OnStatus(status serviceStatus) {
 }
 
 type interactiveStatusDisplay struct {
-	o        *command.OutStream
+	o        *streams.Out
 	statuses []serviceStatus
 }
 
@@ -160,7 +163,7 @@ func displayInteractiveServiceStatus(status serviceStatus, o io.Writer) {
 		status.podsReady, status.podsPending, totalFailed, status.podsTotal)
 }
 
-func newStatusDisplay(o *command.OutStream) statusDisplay {
+func newStatusDisplay(o *streams.Out) statusDisplay {
 	if !o.IsTerminal() {
 		return &forwardOnlyStatusDisplay{o: o, states: map[string]metaServiceState{}}
 	}

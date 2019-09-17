@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 
 	"github.com/docker/cli/cli/command"
-	"github.com/docker/cli/kubernetes"
-	cliv1beta1 "github.com/docker/cli/kubernetes/client/clientset/typed/compose/v1beta1"
+	kubecontext "github.com/docker/cli/cli/context/kubernetes"
+	kubernetes "github.com/docker/compose-on-kubernetes/api"
+	cliv1beta1 "github.com/docker/compose-on-kubernetes/api/client/clientset/typed/compose/v1beta1"
+	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
 	kubeclient "k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // KubeCli holds kubernetes specifics (client, namespace) with the command.Cli
@@ -23,13 +27,16 @@ type KubeCli struct {
 
 // Options contains resolved parameters to initialize kubernetes clients
 type Options struct {
-	Namespace string
-	Config    string
+	Namespace    string
+	Config       string
+	Orchestrator command.Orchestrator
 }
 
 // NewOptions returns an Options initialized with command line flags
-func NewOptions(flags *flag.FlagSet) Options {
-	var opts Options
+func NewOptions(flags *flag.FlagSet, orchestrator command.Orchestrator) Options {
+	opts := Options{
+		Orchestrator: orchestrator,
+	}
 	if namespace, err := flags.GetString("namespace"); err == nil {
 		opts.Namespace = namespace
 	}
@@ -50,12 +57,26 @@ func WrapCli(dockerCli command.Cli, opts Options) (*KubeCli, error) {
 	cli := &KubeCli{
 		Cli: dockerCli,
 	}
-	clientConfig := kubernetes.NewKubernetesConfig(opts.Config)
+	var (
+		clientConfig clientcmd.ClientConfig
+		err          error
+	)
+	if dockerCli.CurrentContext() == "" {
+		clientConfig = kubernetes.NewKubernetesConfig(opts.Config)
+	} else {
+		clientConfig, err = kubecontext.ConfigFromContext(dockerCli.CurrentContext(), dockerCli.ContextStore())
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	cli.kubeNamespace = opts.Namespace
 	if opts.Namespace == "" {
 		configNamespace, _, err := clientConfig.Namespace()
-		if err != nil {
+		switch {
+		case os.IsNotExist(err), os.IsPermission(err):
+			return nil, errors.Wrap(err, "unable to load configuration file")
+		case err != nil:
 			return nil, err
 		}
 		cli.kubeNamespace = configNamespace
@@ -73,7 +94,7 @@ func WrapCli(dockerCli command.Cli, opts Options) (*KubeCli, error) {
 	}
 	cli.clientSet = clientSet
 
-	if dockerCli.ClientInfo().HasAll() {
+	if opts.Orchestrator.HasAll() {
 		if err := cli.checkHostsMatch(); err != nil {
 			return nil, err
 		}
@@ -82,7 +103,7 @@ func WrapCli(dockerCli command.Cli, opts Options) (*KubeCli, error) {
 }
 
 func (c *KubeCli) composeClient() (*Factory, error) {
-	return NewFactory(c.kubeNamespace, c.kubeConfig, c.clientSet)
+	return NewFactory(c.kubeNamespace, c.kubeConfig, c.clientSet, c.ClientInfo().HasExperimental)
 }
 
 func (c *KubeCli) checkHostsMatch() error {

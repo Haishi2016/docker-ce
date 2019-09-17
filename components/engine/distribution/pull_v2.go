@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/containerd/containerd/platforms"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/manifest/manifestlist"
 	"github.com/docker/distribution/manifest/schema1"
@@ -22,7 +23,7 @@ import (
 	"github.com/docker/docker/distribution/metadata"
 	"github.com/docker/docker/distribution/xfer"
 	"github.com/docker/docker/image"
-	"github.com/docker/docker/image/v1"
+	v1 "github.com/docker/docker/image/v1"
 	"github.com/docker/docker/layer"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/progress"
@@ -63,7 +64,7 @@ type v2Puller struct {
 	confirmedV2 bool
 }
 
-func (p *v2Puller) Pull(ctx context.Context, ref reference.Named, os string) (err error) {
+func (p *v2Puller) Pull(ctx context.Context, ref reference.Named, platform *specs.Platform) (err error) {
 	// TODO(tiborvass): was ReceiveTimeout
 	p.repo, p.confirmedV2, err = NewV2Repository(ctx, p.repoInfo, p.endpoint, p.config.MetaHeaders, p.config.AuthConfig, "pull")
 	if err != nil {
@@ -71,7 +72,7 @@ func (p *v2Puller) Pull(ctx context.Context, ref reference.Named, os string) (er
 		return err
 	}
 
-	if err = p.pullV2Repository(ctx, ref, os); err != nil {
+	if err = p.pullV2Repository(ctx, ref, platform); err != nil {
 		if _, ok := err.(fallbackError); ok {
 			return err
 		}
@@ -86,10 +87,10 @@ func (p *v2Puller) Pull(ctx context.Context, ref reference.Named, os string) (er
 	return err
 }
 
-func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named, os string) (err error) {
+func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named, platform *specs.Platform) (err error) {
 	var layersDownloaded bool
 	if !reference.IsNameOnly(ref) {
-		layersDownloaded, err = p.pullV2Tag(ctx, ref, os)
+		layersDownloaded, err = p.pullV2Tag(ctx, ref, platform)
 		if err != nil {
 			return err
 		}
@@ -111,7 +112,7 @@ func (p *v2Puller) pullV2Repository(ctx context.Context, ref reference.Named, os
 			if err != nil {
 				return err
 			}
-			pulledNew, err := p.pullV2Tag(ctx, tagRef, os)
+			pulledNew, err := p.pullV2Tag(ctx, tagRef, platform)
 			if err != nil {
 				// Since this is the pull-all-tags case, don't
 				// allow an error pulling a particular tag to
@@ -327,7 +328,7 @@ func (ld *v2LayerDescriptor) Registered(diffID layer.DiffID) {
 	ld.V2MetadataService.Add(diffID, metadata.V2Metadata{Digest: ld.digest, SourceRepository: ld.repoInfo.Name.Name()})
 }
 
-func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, os string) (tagUpdated bool, err error) {
+func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, platform *specs.Platform) (tagUpdated bool, err error) {
 	manSvc, err := p.repo.Manifests(ctx)
 	if err != nil {
 		return false, err
@@ -391,17 +392,26 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, os string
 		if p.config.RequireSchema2 {
 			return false, fmt.Errorf("invalid manifest: not schema2")
 		}
-		id, manifestDigest, err = p.pullSchema1(ctx, ref, v, os)
+
+		// give registries time to upgrade to schema2 and only warn if we know a registry has been upgraded long time ago
+		// TODO: condition to be removed
+		if reference.Domain(ref) == "docker.io" {
+			msg := fmt.Sprintf("Image %s uses outdated schema1 manifest format. Please upgrade to a schema2 image for better future compatibility. More information at https://docs.docker.com/registry/spec/deprecated-schema-v1/", ref)
+			logrus.Warn(msg)
+			progress.Message(p.config.ProgressOutput, "", msg)
+		}
+
+		id, manifestDigest, err = p.pullSchema1(ctx, ref, v, platform)
 		if err != nil {
 			return false, err
 		}
 	case *schema2.DeserializedManifest:
-		id, manifestDigest, err = p.pullSchema2(ctx, ref, v, os)
+		id, manifestDigest, err = p.pullSchema2(ctx, ref, v, platform)
 		if err != nil {
 			return false, err
 		}
 	case *manifestlist.DeserializedManifestList:
-		id, manifestDigest, err = p.pullManifestList(ctx, ref, v, os)
+		id, manifestDigest, err = p.pullManifestList(ctx, ref, v, platform)
 		if err != nil {
 			return false, err
 		}
@@ -437,7 +447,7 @@ func (p *v2Puller) pullV2Tag(ctx context.Context, ref reference.Named, os string
 	return true, nil
 }
 
-func (p *v2Puller) pullSchema1(ctx context.Context, ref reference.Reference, unverifiedManifest *schema1.SignedManifest, requestedOS string) (id digest.Digest, manifestDigest digest.Digest, err error) {
+func (p *v2Puller) pullSchema1(ctx context.Context, ref reference.Reference, unverifiedManifest *schema1.SignedManifest, platform *specs.Platform) (id digest.Digest, manifestDigest digest.Digest, err error) {
 	var verifiedManifest *schema1.Manifest
 	verifiedManifest, err = verifySchema1Manifest(unverifiedManifest, ref)
 	if err != nil {
@@ -509,6 +519,17 @@ func (p *v2Puller) pullSchema1(ctx context.Context, ref reference.Reference, unv
 		}
 	}
 
+	// In the situation that the API call didn't specify an OS explicitly, but
+	// we support the operating system, switch to that operating system.
+	// eg FROM supertest2014/nyan with no platform specifier, and docker build
+	// with no --platform= flag under LCOW.
+	requestedOS := ""
+	if platform != nil {
+		requestedOS = platform.OS
+	} else if system.IsOSSupported(configOS) {
+		requestedOS = configOS
+	}
+
 	// Early bath if the requested OS doesn't match that of the configuration.
 	// This avoids doing the download, only to potentially fail later.
 	if !strings.EqualFold(configOS, requestedOS) {
@@ -536,7 +557,7 @@ func (p *v2Puller) pullSchema1(ctx context.Context, ref reference.Reference, unv
 	return imageID, manifestDigest, nil
 }
 
-func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *schema2.DeserializedManifest, requestedOS string) (id digest.Digest, manifestDigest digest.Digest, err error) {
+func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *schema2.DeserializedManifest, platform *specs.Platform) (id digest.Digest, manifestDigest digest.Digest, err error) {
 	manifestDigest, err = schema2ManifestDigest(ref, mfst)
 	if err != nil {
 		return "", "", err
@@ -592,6 +613,11 @@ func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *s
 		configPlatform   *specs.Platform // for LCOW when registering downloaded layers
 	)
 
+	layerStoreOS := runtime.GOOS
+	if platform != nil {
+		layerStoreOS = platform.OS
+	}
+
 	// https://github.com/docker/docker/issues/24766 - Err on the side of caution,
 	// explicitly blocking images intended for linux from the Windows daemon. On
 	// Windows, we do this before the attempt to download, effectively serialising
@@ -615,11 +641,13 @@ func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *s
 		if len(descriptors) != len(configRootFS.DiffIDs) {
 			return "", "", errRootFSMismatch
 		}
-
-		// Early bath if the requested OS doesn't match that of the configuration.
-		// This avoids doing the download, only to potentially fail later.
-		if !strings.EqualFold(configPlatform.OS, requestedOS) {
-			return "", "", fmt.Errorf("cannot download image with operating system %q when requesting %q", configPlatform.OS, requestedOS)
+		if platform == nil {
+			// Early bath if the requested OS doesn't match that of the configuration.
+			// This avoids doing the download, only to potentially fail later.
+			if !system.IsOSSupported(configPlatform.OS) {
+				return "", "", fmt.Errorf("cannot download image with operating system %q when requesting %q", configPlatform.OS, layerStoreOS)
+			}
+			layerStoreOS = configPlatform.OS
 		}
 
 		// Populate diff ids in descriptors to avoid downloading foreign layers
@@ -636,7 +664,7 @@ func (p *v2Puller) pullSchema2(ctx context.Context, ref reference.Named, mfst *s
 				rootFS image.RootFS
 			)
 			downloadRootFS := *image.NewRootFS()
-			rootFS, release, err = p.config.DownloadManager.Download(ctx, downloadRootFS, requestedOS, descriptors, p.config.ProgressOutput)
+			rootFS, release, err = p.config.DownloadManager.Download(ctx, downloadRootFS, layerStoreOS, descriptors, p.config.ProgressOutput)
 			if err != nil {
 				// Intentionally do not cancel the config download here
 				// as the error from config download (if there is one)
@@ -722,18 +750,22 @@ func receiveConfig(s ImageConfigStore, configChan <-chan []byte, errChan <-chan 
 
 // pullManifestList handles "manifest lists" which point to various
 // platform-specific manifests.
-func (p *v2Puller) pullManifestList(ctx context.Context, ref reference.Named, mfstList *manifestlist.DeserializedManifestList, os string) (id digest.Digest, manifestListDigest digest.Digest, err error) {
+func (p *v2Puller) pullManifestList(ctx context.Context, ref reference.Named, mfstList *manifestlist.DeserializedManifestList, pp *specs.Platform) (id digest.Digest, manifestListDigest digest.Digest, err error) {
 	manifestListDigest, err = schema2ManifestDigest(ref, mfstList)
 	if err != nil {
 		return "", "", err
 	}
 
-	logrus.Debugf("%s resolved to a manifestList object with %d entries; looking for a %s/%s match", ref, len(mfstList.Manifests), os, runtime.GOARCH)
+	var platform specs.Platform
+	if pp != nil {
+		platform = *pp
+	}
+	logrus.Debugf("%s resolved to a manifestList object with %d entries; looking for a %s/%s match", ref, len(mfstList.Manifests), platforms.Format(platform), runtime.GOARCH)
 
-	manifestMatches := filterManifests(mfstList.Manifests, os)
+	manifestMatches := filterManifests(mfstList.Manifests, platform)
 
 	if len(manifestMatches) == 0 {
-		errMsg := fmt.Sprintf("no matching manifest for %s/%s in the manifest list entries", os, runtime.GOARCH)
+		errMsg := fmt.Sprintf("no matching manifest for %s in the manifest list entries", formatPlatform(platform))
 		logrus.Debugf(errMsg)
 		return "", "", errors.New(errMsg)
 	}
@@ -764,12 +796,18 @@ func (p *v2Puller) pullManifestList(ctx context.Context, ref reference.Named, mf
 
 	switch v := manifest.(type) {
 	case *schema1.SignedManifest:
-		id, _, err = p.pullSchema1(ctx, manifestRef, v, os)
+		msg := fmt.Sprintf("[DEPRECATION NOTICE] v2 schema1 manifests in manifest lists are not supported and will break in a future release. Suggest author of %s to upgrade to v2 schema2. More information at https://docs.docker.com/registry/spec/deprecated-schema-v1/", ref)
+		logrus.Warn(msg)
+		progress.Message(p.config.ProgressOutput, "", msg)
+
+		platform := toOCIPlatform(manifestMatches[0].Platform)
+		id, _, err = p.pullSchema1(ctx, manifestRef, v, &platform)
 		if err != nil {
 			return "", "", err
 		}
 	case *schema2.DeserializedManifest:
-		id, _, err = p.pullSchema2(ctx, manifestRef, v, os)
+		platform := toOCIPlatform(manifestMatches[0].Platform)
+		id, _, err = p.pullSchema2(ctx, manifestRef, v, &platform)
 		if err != nil {
 			return "", "", err
 		}
@@ -938,4 +976,14 @@ func fixManifestLayers(m *schema1.Manifest) error {
 
 func createDownloadFile() (*os.File, error) {
 	return ioutil.TempFile("", "GetImageBlob")
+}
+
+func toOCIPlatform(p manifestlist.PlatformSpec) specs.Platform {
+	return specs.Platform{
+		OS:           p.OS,
+		Architecture: p.Architecture,
+		Variant:      p.Variant,
+		OSFeatures:   p.OSFeatures,
+		OSVersion:    p.OSVersion,
+	}
 }

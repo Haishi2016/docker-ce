@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	composetypes "github.com/docker/cli/cli/compose/types"
-	"github.com/gotestyourself/gotestyourself/assert"
+	"gotest.tools/assert"
 )
 
 func TestFromCompose(t *testing.T) {
@@ -25,18 +25,14 @@ func TestFromCompose(t *testing.T) {
 		},
 	})
 	assert.NilError(t, err)
-	assert.Equal(t, "foo", s.name)
+	assert.Equal(t, "foo", s.Name)
 	assert.Equal(t, string(`version: "3.5"
 services:
   bar:
     image: bar
   foo:
     image: foo
-networks: {}
-volumes: {}
-secrets: {}
-configs: {}
-`), s.composeFile)
+`), s.ComposeFile)
 }
 
 func TestFromComposeUnsupportedVersion(t *testing.T) {

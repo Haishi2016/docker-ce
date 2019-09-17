@@ -27,6 +27,7 @@ A self-sufficient runtime for containers.
 
 Options:
       --config string      Location of client config files (default "/root/.docker")
+  -c, --context string     Name of the context to use to connect to the daemon (overrides DOCKER_HOST env var and default context set with "docker context use")
   -D, --debug              Enable debug mode
       --help               Print usage
   -H, --host value         Daemon socket(s) to connect to (default [])
@@ -61,11 +62,13 @@ by the `docker` command line:
 * `DOCKER_API_VERSION` The API version to use (e.g. `1.19`)
 * `DOCKER_CONFIG` The location of your client configuration files.
 * `DOCKER_CERT_PATH` The location of your authentication keys.
+* `DOCKER_CLI_EXPERIMENTAL` Enable experimental features for the cli (e.g. `enabled` or `disabled`)
 * `DOCKER_DRIVER` The graph driver to use.
 * `DOCKER_HOST` Daemon socket to connect to.
 * `DOCKER_NOWARN_KERNEL_VERSION` Prevent warnings that your Linux kernel is
   unsuitable for Docker.
 * `DOCKER_RAMDISK` If set this will disable 'pivot_root'.
+* `DOCKER_STACK_ORCHESTRATOR` Configure the default orchestrator to use when using `docker stack` management commands.
 * `DOCKER_TLS` When set Docker uses TLS.
 * `DOCKER_TLS_VERIFY` When set Docker uses TLS and verifies the remote.
 * `DOCKER_CONTENT_TRUST` When set Docker uses notary to sign and verify images.
@@ -76,6 +79,8 @@ by the `docker` command line:
   `docker pull`) in `docker help` output, and only `Management commands` per object-type (e.g., `docker container`) are
   printed. This may become the default in a future release, at which point this environment-variable is removed.
 * `DOCKER_TMPDIR` Location for temporary Docker files.
+* `DOCKER_CONTEXT` Specify the context to use (overrides DOCKER_HOST env var and default context set with "docker context use")
+* `DOCKER_DEFAULT_PLATFORM` Specify the default platform for the commands that take the `--platform` flag.
 
 Because Docker is developed using Go, you can also use any environment
 variables used by the Go runtime. In particular, you may find these useful:
@@ -91,28 +96,43 @@ variables.
 ### Configuration files
 
 By default, the Docker command line stores its configuration files in a
-directory called `.docker` within your `$HOME` directory. However, you can
-specify a different location via the `DOCKER_CONFIG` environment variable
-or the `--config` command line option. If both are specified, then the
-`--config` option overrides the `DOCKER_CONFIG` environment variable.
-For example:
-
-    docker --config ~/testconfigs/ ps
-
-Instructs Docker to use the configuration files in your `~/testconfigs/`
-directory when running the `ps` command.
+directory called `.docker` within your `$HOME` directory.
 
 Docker manages most of the files in the configuration directory
 and you should not modify them. However, you *can modify* the
 `config.json` file to control certain aspects of how the `docker`
 command behaves.
 
-Currently, you can modify the `docker` command behavior using environment
+You can modify the `docker` command behavior using environment
 variables or command-line options. You can also use options within
-`config.json` to modify some of the same behavior. When using these
-mechanisms, you must keep in mind the order of precedence among them. Command
-line options override environment variables and environment variables override
-properties you specify in a `config.json` file.
+`config.json` to modify some of the same behavior. If an environment variable
+and the `--config` flag are set, the flag takes precedent over the environment
+variable. Command line options override environment variables and environment
+variables override properties you specify in a `config.json` file.
+
+
+#### Change the `.docker` directory
+
+To specify a different directory, use the `DOCKER_CONFIG`
+environment variable or the `--config` command line option. If both are
+specified, then the `--config` option overrides the `DOCKER_CONFIG` environment
+variable. The example below overrides runs the `docker ps` command using a
+`config.json` file located in the `~/testconfigs/` directory.
+
+```bash
+$ docker --config ~/testconfigs/ ps
+```
+
+This flag only applies to whatever command is being ran. For persistent
+configuration, you can set the `DOCKER_CONFIG` environment variable in your
+shell (e.g. `~/.profile` or `~/.bashrc`). The example below sets the new
+directory to be `HOME/newdir/.docker`.
+
+```bash
+echo export DOCKER_CONFIG=$HOME/newdir/.docker > ~/.profile
+```
+
+#### `config.json` properties
 
 The `config.json` file stores a JSON encoding of several properties:
 
@@ -196,6 +216,11 @@ credentials for specific registries. If this property is set, the binary
 for a specific registry. For more information, see the
 [**Credential helpers** section in the `docker login` documentation](login.md#credential-helpers)
 
+The property `stackOrchestrator` specifies the default orchestrator to use when
+running `docker stack` management commands. Valid values are `"swarm"`,
+`"kubernetes"`, and `"all"`. This property can be overridden with the
+`DOCKER_STACK_ORCHESTRATOR` environment variable, or the `--orchestrator` flag.
+
 Once attached to a container, users detach from it and leave it running using
 the using `CTRL-p CTRL-q` key sequence. This detach key sequence is customizable
 using the `detachKeys` property. Specify a `<sequence>` value for the
@@ -213,6 +238,10 @@ Your customization applies to all containers started in with your Docker client.
 Users can override your custom or the default key sequence on a per-container
 basis. To do this, the user specifies the `--detach-keys` flag with the `docker
 attach`, `docker exec`, `docker run` or `docker start` command.
+
+The property `plugins` contains settings specific to CLI plugins. The
+key is the plugin name, while the value is a further map of options,
+which are specific to that plugin.
 
 Following is a sample `config.json` file:
 
@@ -236,10 +265,37 @@ Following is a sample `config.json` file:
   "credHelpers": {
     "awesomereg.example.org": "hip-star",
     "unicorn.example.com": "vcbait"
+  },
+  "stackOrchestrator": "kubernetes",
+  "plugins": {
+    "plugin1": {
+      "option": "value"
+    },
+    "plugin2": {
+      "anotheroption": "anothervalue",
+      "athirdoption": "athirdvalue"
+    }
   }
 }
 {% endraw %}
 ```
+
+### Experimental features
+
+To enable experimental features, edit the `config.json` file and set
+`experimental` to `enabled`. The example below enables experimental features
+in a `config.json` file that already enables a debug feature.
+
+```json
+{
+  "experimental": "enabled",
+  "debug": true
+}
+```
+
+You can also enable experimental features from the Docker Desktop menu. See the
+[Docker Desktop Getting Started page](https://docs.docker.com/docker-for-mac#experimental-features)
+for more information.
 
 ### Notary
 

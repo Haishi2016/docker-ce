@@ -122,7 +122,7 @@ func (p *Controller) Prepare(ctx context.Context) (err error) {
 		return p.backend.Upgrade(ctx, remote, p.spec.Name, nil, &authConfig, privs, ioutil.Discard)
 	}
 
-	if err := p.backend.Pull(ctx, remote, p.spec.Name, nil, &authConfig, privs, ioutil.Discard, plugin.WithSwarmService(p.serviceID)); err != nil {
+	if err := p.backend.Pull(ctx, remote, p.spec.Name, nil, &authConfig, privs, ioutil.Discard, plugin.WithSwarmService(p.serviceID), plugin.WithEnv(p.spec.Env)); err != nil {
 		return err
 	}
 	pl, err = p.backend.Get(p.spec.Name)
@@ -180,7 +180,7 @@ func (p *Controller) Wait(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case e := <-events:
-			p.logger.Debugf("got event %#T", e)
+			p.logger.Debugf("got event %T", e)
 
 			switch e.(type) {
 			case plugin.EventEnable:

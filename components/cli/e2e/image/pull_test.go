@@ -5,9 +5,11 @@ import (
 
 	"github.com/docker/cli/e2e/internal/fixtures"
 	"github.com/docker/cli/internal/test/environment"
-	"github.com/gotestyourself/gotestyourself/golden"
-	"github.com/gotestyourself/gotestyourself/icmd"
-	"github.com/gotestyourself/gotestyourself/skip"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/golden"
+	"gotest.tools/icmd"
+	"gotest.tools/skip"
 )
 
 const registryPrefix = "registry:5000"
@@ -30,6 +32,13 @@ func TestPullWithContentTrust(t *testing.T) {
 	result.Assert(t, icmd.Success)
 	golden.Assert(t, result.Stderr(), "pull-with-content-trust-err.golden")
 	golden.Assert(t, result.Stdout(), "pull-with-content-trust.golden")
+}
+
+func TestPullQuiet(t *testing.T) {
+	result := icmd.RunCommand("docker", "pull", "--quiet", fixtures.AlpineImage)
+	result.Assert(t, icmd.Success)
+	assert.Check(t, is.Equal(result.Stdout(), "registry:5000/alpine:3.6\n"))
+	assert.Check(t, is.Equal(result.Stderr(), ""))
 }
 
 func TestPullWithContentTrustUsesCacheWhenNotaryUnavailable(t *testing.T) {

@@ -40,7 +40,7 @@ func Services(
 		if err != nil {
 			return nil, errors.Wrapf(err, "service %s", service.Name)
 		}
-		configs, err := convertServiceConfigObjs(client, namespace, service.Configs, config.Configs)
+		configs, err := convertServiceConfigObjs(client, namespace, service, config.Configs)
 		if err != nil {
 			return nil, errors.Wrapf(err, "service %s", service.Name)
 		}
@@ -109,7 +109,9 @@ func Service(
 	}
 
 	var privileges swarm.Privileges
-	privileges.CredentialSpec, err = convertCredentialSpec(service.CredentialSpec)
+	privileges.CredentialSpec, err = convertCredentialSpec(
+		namespace, service.CredentialSpec, configs,
+	)
 	if err != nil {
 		return swarm.ServiceSpec{}, err
 	}
@@ -141,7 +143,7 @@ func Service(
 				Dir:             service.WorkingDir,
 				User:            service.User,
 				Mounts:          mounts,
-				StopGracePeriod: service.StopGracePeriod,
+				StopGracePeriod: composetypes.ConvertDurationPtr(service.StopGracePeriod),
 				StopSignal:      service.StopSignal,
 				TTY:             service.Tty,
 				OpenStdin:       service.StdinOpen,
@@ -150,6 +152,8 @@ func Service(
 				ReadOnly:        service.ReadOnly,
 				Privileges:      &privileges,
 				Isolation:       container.Isolation(service.Isolation),
+				Init:            service.Init,
+				Sysctls:         service.Sysctls,
 			},
 			LogDriver:     logDriver,
 			Resources:     resources,
@@ -157,6 +161,7 @@ func Service(
 			Placement: &swarm.Placement{
 				Constraints: service.Deploy.Placement.Constraints,
 				Preferences: getPlacementPreference(service.Deploy.Placement.Preferences),
+				MaxReplicas: service.Deploy.Placement.MaxReplicas,
 			},
 		},
 		EndpointSpec:   endpoint,
@@ -201,12 +206,6 @@ func sortStrings(strs []string) []string {
 	return strs
 }
 
-type byNetworkTarget []swarm.NetworkAttachmentConfig
-
-func (a byNetworkTarget) Len() int           { return len(a) }
-func (a byNetworkTarget) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byNetworkTarget) Less(i, j int) bool { return a[i].Target < a[j].Target }
-
 func convertServiceNetworks(
 	networks map[string]*composetypes.ServiceNetworkConfig,
 	networkConfigs networkMap,
@@ -245,7 +244,9 @@ func convertServiceNetworks(
 		nets = append(nets, netAttachConfig)
 	}
 
-	sort.Sort(byNetworkTarget(nets))
+	sort.Slice(nets, func(i, j int) bool {
+		return nets[i].Target < nets[j].Target
+	})
 	return nets, nil
 }
 
@@ -287,11 +288,17 @@ func convertServiceSecrets(
 	return secrs, err
 }
 
+// convertServiceConfigObjs takes an API client, a namespace, a ServiceConfig,
+// and a set of compose Config specs, and creates the swarm ConfigReferences
+// required by the serivce. Unlike convertServiceSecrets, this takes the whole
+// ServiceConfig, because some Configs may be needed as a result of other
+// fields (like CredentialSpecs).
+//
 // TODO: fix configs API so that ConfigsAPIClient is not required here
 func convertServiceConfigObjs(
 	client client.ConfigAPIClient,
 	namespace Namespace,
-	configs []composetypes.ServiceConfigObjConfig,
+	service composetypes.ServiceConfig,
 	configSpecs map[string]composetypes.ConfigObjConfig,
 ) ([]*swarm.ConfigReference, error) {
 	refs := []*swarm.ConfigReference{}
@@ -303,7 +310,7 @@ func convertServiceConfigObjs(
 		}
 		return composetypes.FileObjectConfig(configSpec), nil
 	}
-	for _, config := range configs {
+	for _, config := range service.Configs {
 		obj, err := convertFileObject(namespace, composetypes.FileReferenceConfig(config), lookup)
 		if err != nil {
 			return nil, err
@@ -314,6 +321,38 @@ func convertServiceConfigObjs(
 			File:       &file,
 			ConfigName: obj.Name,
 		})
+	}
+
+	// finally, after converting all of the file objects, create any
+	// Runtime-type configs that are needed. these are configs that are not
+	// mounted into the container, but are used in some other way by the
+	// container runtime. Currently, this only means CredentialSpecs, but in
+	// the future it may be used for other fields
+
+	// grab the CredentialSpec out of the Service
+	credSpec := service.CredentialSpec
+	// if the credSpec uses a config, then we should grab the config name, and
+	// create a config reference for it. A File or Registry-type CredentialSpec
+	// does not need this operation.
+	if credSpec.Config != "" {
+		// look up the config in the configSpecs.
+		obj, err := lookup(credSpec.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		// get the actual correct name.
+		name := namespace.Scope(credSpec.Config)
+		if obj.Name != "" {
+			name = obj.Name
+		}
+
+		// now append a Runtime-type config.
+		refs = append(refs, &swarm.ConfigReference{
+			ConfigName: name,
+			Runtime:    &swarm.ConfigReferenceRuntimeTarget{},
+		})
+
 	}
 
 	confs, err := servicecli.ParseConfigs(client, refs)
@@ -343,11 +382,6 @@ func convertFileObject(
 	config composetypes.FileReferenceConfig,
 	lookup func(key string) (composetypes.FileObjectConfig, error),
 ) (swarmReferenceObject, error) {
-	target := config.Target
-	if target == "" {
-		target = config.Source
-	}
-
 	obj, err := lookup(config.Source)
 	if err != nil {
 		return swarmReferenceObject{}, err
@@ -356,6 +390,11 @@ func convertFileObject(
 	source := namespace.Scope(config.Source)
 	if obj.Name != "" {
 		source = obj.Name
+	}
+
+	target := config.Target
+	if target == "" {
+		target = config.Source
 	}
 
 	uid := config.UID
@@ -417,13 +456,13 @@ func convertHealthcheck(healthcheck *composetypes.HealthCheckConfig) (*container
 
 	}
 	if healthcheck.Timeout != nil {
-		timeout = *healthcheck.Timeout
+		timeout = time.Duration(*healthcheck.Timeout)
 	}
 	if healthcheck.Interval != nil {
-		interval = *healthcheck.Interval
+		interval = time.Duration(*healthcheck.Interval)
 	}
 	if healthcheck.StartPeriod != nil {
-		startPeriod = *healthcheck.StartPeriod
+		startPeriod = time.Duration(*healthcheck.StartPeriod)
 	}
 	if healthcheck.Retries != nil {
 		retries = int(*healthcheck.Retries)
@@ -461,11 +500,12 @@ func convertRestartPolicy(restart string, source *composetypes.RestartPolicy) (*
 			return nil, errors.Errorf("unknown restart policy: %s", restart)
 		}
 	}
+
 	return &swarm.RestartPolicy{
 		Condition:   swarm.RestartPolicyCondition(source.Condition),
-		Delay:       source.Delay,
+		Delay:       composetypes.ConvertDurationPtr(source.Delay),
 		MaxAttempts: source.MaxAttempts,
-		Window:      source.Window,
+		Window:      composetypes.ConvertDurationPtr(source.Window),
 	}, nil
 }
 
@@ -479,9 +519,9 @@ func convertUpdateConfig(source *composetypes.UpdateConfig) *swarm.UpdateConfig 
 	}
 	return &swarm.UpdateConfig{
 		Parallelism:     parallel,
-		Delay:           source.Delay,
+		Delay:           time.Duration(source.Delay),
 		FailureAction:   source.FailureAction,
-		Monitor:         source.Monitor,
+		Monitor:         time.Duration(source.Monitor),
 		MaxFailureRatio: source.MaxFailureRatio,
 		Order:           source.Order,
 	}
@@ -535,12 +575,6 @@ func convertResources(source composetypes.Resources) (*swarm.ResourceRequirement
 	return resources, nil
 }
 
-type byPublishedPort []swarm.PortConfig
-
-func (a byPublishedPort) Len() int           { return len(a) }
-func (a byPublishedPort) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byPublishedPort) Less(i, j int) bool { return a[i].PublishedPort < a[j].PublishedPort }
-
 func convertEndpointSpec(endpointMode string, source []composetypes.ServicePortConfig) (*swarm.EndpointSpec, error) {
 	portConfigs := []swarm.PortConfig{}
 	for _, port := range source {
@@ -553,7 +587,10 @@ func convertEndpointSpec(endpointMode string, source []composetypes.ServicePortC
 		portConfigs = append(portConfigs, portConfig)
 	}
 
-	sort.Sort(byPublishedPort(portConfigs))
+	sort.Slice(portConfigs, func(i, j int) bool {
+		return portConfigs[i].PublishedPort < portConfigs[j].PublishedPort
+	})
+
 	return &swarm.EndpointSpec{
 		Mode:  swarm.ResolutionMode(strings.ToLower(endpointMode)),
 		Ports: portConfigs,
@@ -602,13 +639,46 @@ func convertDNSConfig(DNS []string, DNSSearch []string) (*swarm.DNSConfig, error
 	return nil, nil
 }
 
-func convertCredentialSpec(spec composetypes.CredentialSpecConfig) (*swarm.CredentialSpec, error) {
-	if spec.File == "" && spec.Registry == "" {
-		return nil, nil
+func convertCredentialSpec(namespace Namespace, spec composetypes.CredentialSpecConfig, refs []*swarm.ConfigReference) (*swarm.CredentialSpec, error) {
+	var o []string
+
+	// Config was added in API v1.40
+	if spec.Config != "" {
+		o = append(o, `"Config"`)
 	}
-	if spec.File != "" && spec.Registry != "" {
-		return nil, errors.New("Invalid credential spec - must provide one of `File` or `Registry`")
+	if spec.File != "" {
+		o = append(o, `"File"`)
+	}
+	if spec.Registry != "" {
+		o = append(o, `"Registry"`)
+	}
+	l := len(o)
+	switch {
+	case l == 0:
+		return nil, nil
+	case l == 2:
+		return nil, errors.Errorf("invalid credential spec: cannot specify both %s and %s", o[0], o[1])
+	case l > 2:
+		return nil, errors.Errorf("invalid credential spec: cannot specify both %s, and %s", strings.Join(o[:l-1], ", "), o[l-1])
 	}
 	swarmCredSpec := swarm.CredentialSpec(spec)
+	// if we're using a swarm Config for the credential spec, over-write it
+	// here with the config ID
+	if swarmCredSpec.Config != "" {
+		for _, config := range refs {
+			if swarmCredSpec.Config == config.ConfigName {
+				swarmCredSpec.Config = config.ConfigID
+				return &swarmCredSpec, nil
+			}
+		}
+		// if none of the configs match, try namespacing
+		for _, config := range refs {
+			if namespace.Scope(swarmCredSpec.Config) == config.ConfigName {
+				swarmCredSpec.Config = config.ConfigID
+				return &swarmCredSpec, nil
+			}
+		}
+		return nil, errors.Errorf("invalid credential spec: spec specifies config %v, but no such config can be found", swarmCredSpec.Config)
+	}
 	return &swarmCredSpec, nil
 }

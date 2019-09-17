@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 )
 
 // Seconds to wait after sending TERM before trying KILL
-const termProcessTimeout = 10
+const termProcessTimeout = 10 * time.Second
 
 func (d *Daemon) registerExecCommand(container *container.Container, config *exec.Config) {
 	// Storing execs in container in order to kill them gracefully whenever the container is stopped or removed.
@@ -217,12 +218,23 @@ func (d *Daemon) ContainerExecStart(ctx context.Context, name string, stdin io.R
 		ec.StreamConfig.NewNopInputPipe()
 	}
 
-	p := &specs.Process{
-		Args:     append([]string{ec.Entrypoint}, ec.Args...),
-		Env:      ec.Env,
-		Terminal: ec.Tty,
-		Cwd:      ec.WorkingDir,
+	p := &specs.Process{}
+	if runtime.GOOS != "windows" {
+		container, err := d.containerdCli.LoadContainer(ctx, ec.ContainerID)
+		if err != nil {
+			return err
+		}
+		spec, err := container.Spec(ctx)
+		if err != nil {
+			return err
+		}
+		p = spec.Process
 	}
+	p.Args = append([]string{ec.Entrypoint}, ec.Args...)
+	p.Env = ec.Env
+	p.Cwd = ec.WorkingDir
+	p.Terminal = ec.Tty
+
 	if p.Cwd == "" {
 		p.Cwd = "/"
 	}
@@ -249,6 +261,9 @@ func (d *Daemon) ContainerExecStart(ctx context.Context, name string, stdin io.R
 	ec.Lock()
 	c.ExecCommands.Lock()
 	systemPid, err := d.containerd.Exec(ctx, c.ID, ec.ID, p, cStdin != nil, ec.InitializeStdio)
+	// the exec context should be ready, or error happened.
+	// close the chan to notify readiness
+	close(ec.Started)
 	if err != nil {
 		c.ExecCommands.Unlock()
 		ec.Unlock()
@@ -262,9 +277,13 @@ func (d *Daemon) ContainerExecStart(ctx context.Context, name string, stdin io.R
 	case <-ctx.Done():
 		logrus.Debugf("Sending TERM signal to process %v in container %v", name, c.ID)
 		d.containerd.SignalProcess(ctx, c.ID, name, int(signal.SignalMap["TERM"]))
+
+		timeout := time.NewTimer(termProcessTimeout)
+		defer timeout.Stop()
+
 		select {
-		case <-time.After(termProcessTimeout * time.Second):
-			logrus.Infof("Container %v, process %v failed to exit within %d seconds of signal TERM - using the force", c.ID, name, termProcessTimeout)
+		case <-timeout.C:
+			logrus.Infof("Container %v, process %v failed to exit within %v of signal TERM - using the force", c.ID, name, termProcessTimeout)
 			d.containerd.SignalProcess(ctx, c.ID, name, int(signal.SignalMap["KILL"]))
 		case <-attachErr:
 			// TERM signal worked

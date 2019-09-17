@@ -16,15 +16,12 @@ import (
 const (
 	defaultContainerTableFormat = "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.RunningFor}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"
 
-	containerIDHeader = "CONTAINER ID"
-	namesHeader       = "NAMES"
-	commandHeader     = "COMMAND"
-	runningForHeader  = "CREATED"
-	statusHeader      = "STATUS"
-	portsHeader       = "PORTS"
-	mountsHeader      = "MOUNTS"
-	localVolumes      = "LOCAL VOLUMES"
-	networksHeader    = "NETWORKS"
+	namesHeader      = "NAMES"
+	commandHeader    = "COMMAND"
+	runningForHeader = "CREATED"
+	mountsHeader     = "MOUNTS"
+	localVolumes     = "LOCAL VOLUMES"
+	networksHeader   = "NETWORKS"
 )
 
 // NewContainerFormat returns a Format for rendering using a Context
@@ -32,7 +29,7 @@ func NewContainerFormat(source string, quiet bool, size bool) Format {
 	switch source {
 	case TableFormatKey:
 		if quiet {
-			return defaultQuietFormat
+			return DefaultQuietFormat
 		}
 		format := defaultContainerTableFormat
 		if size {
@@ -47,6 +44,7 @@ func NewContainerFormat(source string, quiet bool, size bool) Format {
 image: {{.Image}}
 command: {{.Command}}
 created_at: {{.CreatedAt}}
+state: {{- pad .State 1 0}}
 status: {{- pad .Status 1 0}}
 names: {{.Names}}
 labels: {{- pad .Labels 1 0}}
@@ -62,7 +60,7 @@ ports: {{- pad .Ports 1 0}}
 
 // ContainerWrite renders the context for a list of containers
 func ContainerWrite(ctx Context, containers []types.Container) error {
-	render := func(format func(subContext subContext) error) error {
+	render := func(format func(subContext SubContext) error) error {
 		for _, container := range containers {
 			err := format(&containerContext{trunc: ctx.Trunc, c: container})
 			if err != nil {
@@ -74,16 +72,6 @@ func ContainerWrite(ctx Context, containers []types.Container) error {
 	return ctx.Write(newContainerContext(), render)
 }
 
-type containerHeaderContext map[string]string
-
-func (c containerHeaderContext) Label(name string) string {
-	n := strings.Split(name, ".")
-	r := strings.NewReplacer("-", " ", "_", " ")
-	h := r.Replace(n[len(n)-1])
-
-	return h
-}
-
 type containerContext struct {
 	HeaderContext
 	trunc bool
@@ -92,17 +80,18 @@ type containerContext struct {
 
 func newContainerContext() *containerContext {
 	containerCtx := containerContext{}
-	containerCtx.header = containerHeaderContext{
-		"ID":           containerIDHeader,
+	containerCtx.Header = SubHeaderContext{
+		"ID":           ContainerIDHeader,
 		"Names":        namesHeader,
-		"Image":        imageHeader,
+		"Image":        ImageHeader,
 		"Command":      commandHeader,
-		"CreatedAt":    createdAtHeader,
+		"CreatedAt":    CreatedAtHeader,
 		"RunningFor":   runningForHeader,
-		"Ports":        portsHeader,
-		"Status":       statusHeader,
-		"Size":         sizeHeader,
-		"Labels":       labelsHeader,
+		"Ports":        PortsHeader,
+		"State":        StateHeader,
+		"Status":       StatusHeader,
+		"Size":         SizeHeader,
+		"Labels":       LabelsHeader,
 		"Mounts":       mountsHeader,
 		"LocalVolumes": localVolumes,
 		"Networks":     networksHeader,
@@ -111,7 +100,7 @@ func newContainerContext() *containerContext {
 }
 
 func (c *containerContext) MarshalJSON() ([]byte, error) {
-	return marshalJSON(c)
+	return MarshalJSON(c)
 }
 
 func (c *containerContext) ID() string {
@@ -180,6 +169,10 @@ func (c *containerContext) RunningFor() string {
 
 func (c *containerContext) Ports() string {
 	return DisplayablePorts(c.c.Ports)
+}
+
+func (c *containerContext) State() string {
+	return c.c.State
 }
 
 func (c *containerContext) Status() string {
@@ -269,7 +262,10 @@ func DisplayablePorts(ports []types.Port) string {
 	var result []string
 	var hostMappings []string
 	var groupMapKeys []string
-	sort.Sort(byPortInfo(ports))
+	sort.Slice(ports, func(i, j int) bool {
+		return comparePorts(ports[i], ports[j])
+	})
+
 	for _, port := range ports {
 		current := port.PrivatePort
 		portKey := port.Type
@@ -322,23 +318,18 @@ func formGroup(key string, start, last uint16) string {
 	return fmt.Sprintf("%s/%s", group, groupType)
 }
 
-// byPortInfo is a temporary type used to sort types.Port by its fields
-type byPortInfo []types.Port
-
-func (r byPortInfo) Len() int      { return len(r) }
-func (r byPortInfo) Swap(i, j int) { r[i], r[j] = r[j], r[i] }
-func (r byPortInfo) Less(i, j int) bool {
-	if r[i].PrivatePort != r[j].PrivatePort {
-		return r[i].PrivatePort < r[j].PrivatePort
+func comparePorts(i, j types.Port) bool {
+	if i.PrivatePort != j.PrivatePort {
+		return i.PrivatePort < j.PrivatePort
 	}
 
-	if r[i].IP != r[j].IP {
-		return r[i].IP < r[j].IP
+	if i.IP != j.IP {
+		return i.IP < j.IP
 	}
 
-	if r[i].PublicPort != r[j].PublicPort {
-		return r[i].PublicPort < r[j].PublicPort
+	if i.PublicPort != j.PublicPort {
+		return i.PublicPort < j.PublicPort
 	}
 
-	return r[i].Type < r[j].Type
+	return i.Type < j.Type
 }

@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/docker/cli/internal/test/environment"
-	"github.com/gotestyourself/gotestyourself/golden"
-	"github.com/gotestyourself/gotestyourself/icmd"
-	"github.com/gotestyourself/gotestyourself/poll"
-	"github.com/gotestyourself/gotestyourself/skip"
+	"gotest.tools/golden"
+	"gotest.tools/icmd"
+	"gotest.tools/poll"
+	"gotest.tools/skip"
 )
 
 var pollSettings = environment.DefaultPollSettings
@@ -29,8 +29,8 @@ func testRemove(t *testing.T, orchestrator string) {
 	stackname := "test-stack-remove-" + orchestrator
 	deployFullStack(t, orchestrator, stackname)
 	defer cleanupFullStack(t, orchestrator, stackname)
-	result := icmd.RunCommand("docker", "--orchestrator", orchestrator,
-		"stack", "rm", stackname)
+	result := icmd.RunCommand("docker", "stack", "rm",
+		stackname, "--orchestrator", orchestrator)
 	result.Assert(t, icmd.Expected{Err: icmd.None})
 	golden.Assert(t, result.Stdout(),
 		fmt.Sprintf("stack-remove-%s-success.golden", orchestrator))
@@ -38,22 +38,22 @@ func testRemove(t *testing.T, orchestrator string) {
 
 func deployFullStack(t *testing.T, orchestrator, stackname string) {
 	// TODO: this stack should have full options not minimal options
-	result := icmd.RunCommand("docker", "--orchestrator", orchestrator,
-		"stack", "deploy", "--compose-file=./testdata/full-stack.yml", stackname)
+	result := icmd.RunCommand("docker", "stack", "deploy",
+		"--compose-file=./testdata/full-stack.yml", stackname, "--orchestrator", orchestrator)
 	result.Assert(t, icmd.Success)
 
 	poll.WaitOn(t, taskCount(orchestrator, stackname, 2), pollSettings)
 }
 
 func cleanupFullStack(t *testing.T, orchestrator, stackname string) {
-	// FIXME(vdemeester) we shouldn't have to do that. it is hidding a race on docker stack rm
+	// FIXME(vdemeester) we shouldn't have to do that. it is hiding a race on docker stack rm
 	poll.WaitOn(t, stackRm(orchestrator, stackname), pollSettings)
 	poll.WaitOn(t, taskCount(orchestrator, stackname, 0), pollSettings)
 }
 
 func stackRm(orchestrator, stackname string) func(t poll.LogT) poll.Result {
 	return func(poll.LogT) poll.Result {
-		result := icmd.RunCommand("docker", "--orchestrator", orchestrator, "stack", "rm", stackname)
+		result := icmd.RunCommand("docker", "stack", "rm", stackname, "--orchestrator", orchestrator)
 		if result.Error != nil {
 			if strings.Contains(result.Stderr(), "not found") {
 				return poll.Success()
@@ -66,7 +66,7 @@ func stackRm(orchestrator, stackname string) func(t poll.LogT) poll.Result {
 
 func taskCount(orchestrator, stackname string, expected int) func(t poll.LogT) poll.Result {
 	return func(poll.LogT) poll.Result {
-		args := []string{"--orchestrator", orchestrator, "stack", "ps", stackname}
+		args := []string{"stack", "ps", stackname, "--orchestrator", orchestrator}
 		// FIXME(chris-crone): remove when we support filtering by desired-state on kubernetes
 		if orchestrator == "swarm" {
 			args = append(args, "-f=desired-state=running")
