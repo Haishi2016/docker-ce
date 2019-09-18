@@ -131,14 +131,14 @@ func (daemon *Daemon) create(opts createOpts) (retC *container.Container, retErr
 		if runtime.GOOS == "windows" && img.OS == "linux" && !system.LCOWSupported() {
 			return nil, errors.New("operating system on which parent image was created is not Windows")
 		}
-		if len(params.Config.Patches) > 0 {
+		if len(opts.params.Config.Patches) > 0 {
 			allPatches := false
 			criticalPatches := false
-			for i := 0; i < len(params.Config.Patches); i++ {
-				if val := params.Config.Patches[i]; strings.EqualFold(val, "all") {
+			for i := 0; i < len(opts.params.Config.Patches); i++ {
+				if val := opts.params.Config.Patches[i]; strings.EqualFold(val, "all") {
 					allPatches = true
 				}
-				if val := params.Config.Patches[i]; strings.EqualFold(val, "critical") {
+				if val := opts.params.Config.Patches[i]; strings.EqualFold(val, "critical") {
 					criticalPatches = true
 				}
 			}
@@ -159,9 +159,9 @@ func (daemon *Daemon) create(opts createOpts) (retC *container.Container, retErr
 						}
 					}
 				}
-				params.Config.Patches = make([]string, len(patches))
-				copy(params.Config.Patches, patches)
-				logrus.Debugf("Updated Patch List: %v", params.Config.Patches)
+				opts.params.Config.Patches = make([]string, len(patches))
+				copy(opts.params.Config.Patches, patches)
+				logrus.Debugf("Updated Patch List: %v", opts.params.Config.Patches)
 			}
 
 		}
